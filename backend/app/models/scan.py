@@ -16,6 +16,7 @@ class Scan(Base):
     scan_depth = Column(Integer, nullable=True)
     similarity_threshold = Column(Float, default=50.0)
     total_files = Column(Integer, nullable=True)
+    total_dirs = Column(Integer, nullable=True)
     total_size = Column(BigInteger, nullable=True)
     duplicates_found = Column(Integer, nullable=True)
     space_recoverable = Column(BigInteger, nullable=True)

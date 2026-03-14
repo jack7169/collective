@@ -27,6 +27,8 @@ class ScanProgressInfo:
     percent: Optional[float] = None
     message: Optional[str] = None
     total_files: Optional[int] = None
+    total_dirs: Optional[int] = None
+    total_size: Optional[int] = None
 
 
 class ScannerBackend(ABC):

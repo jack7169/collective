@@ -120,11 +120,11 @@ export function ScanProgress() {
       </Card>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Files Found
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Files
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -136,27 +136,44 @@ export function ScanProgress() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Duplicates
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Directories
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold">
-              {formatNumber(progress?.duplicates_found ?? scan?.duplicates_found ?? 0)}
+              {formatNumber(progress?.total_dirs ?? scan?.total_dirs ?? 0)}
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Status
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Total Size
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-1.5 text-xl font-bold capitalize">
-              <Zap className="h-4 w-4 text-warning" />
-              {rawStatus}
+            <div className="text-xl font-bold">
+              {formatBytes(progress?.total_size ?? scan?.total_size ?? 0)}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Duplicates
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl font-bold">
+              {formatNumber(progress?.duplicates_found ?? scan?.duplicates_found ?? 0)}
+              {(scan?.space_recoverable ?? 0) > 0 && (
+                <span className="text-sm font-normal text-muted-foreground ml-1">
+                  ({formatBytes(scan?.space_recoverable ?? 0)})
+                </span>
+              )}
             </div>
           </CardContent>
         </Card>

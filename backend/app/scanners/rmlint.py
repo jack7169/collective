@@ -111,19 +111,30 @@ class RmlintBackend(ScannerBackend):
         if not line:
             return None
 
-        # rmlint traversal: "Traversing (17629 usable files / 0 + 0 ignored files / folders)"
-        traversing_count = re.search(r"Traversing\s*\((\d+)\s+usable files", line)
-        if traversing_count:
-            count = int(traversing_count.group(1))
+        # rmlint traversal: "Traversing (17629 usable files / 0 + 123 ignored files / folders)"
+        traversal_full = re.search(
+            r"Traversing\s*\((\d+)\s+usable files\s*/\s*(\d+)\s*\+\s*(\d+)\s+ignored",
+            line
+        )
+        if traversal_full:
+            files = int(traversal_full.group(1))
+            dirs = int(traversal_full.group(3))  # "ignored folders" ≈ dir count
             return ScanProgressInfo(
-                message=f"Traversing: {count:,} files found",
-                total_files=count,
+                message=f"Traversing: {files:,} files, {dirs:,} dirs",
+                total_files=files,
+                total_dirs=dirs,
             )
 
-        # Simple traversing path
-        traversing = re.search(r"Traversing\s+'?([^'(]+)'?", line)
-        if traversing:
-            return ScanProgressInfo(message=f"Traversing {traversing.group(1).strip()}")
+        # Simpler traversal (just file count)
+        traversal_simple = re.search(r"Traversing\s*\((\d+)\s+usable files", line)
+        if traversal_simple:
+            files = int(traversal_simple.group(1))
+            return ScanProgressInfo(message=f"Traversing: {files:,} files", total_files=files)
+
+        # Traversing a path
+        traversal_path = re.search(r"Traversing\s+'?([^'(]+)'?", line)
+        if traversal_path:
+            return ScanProgressInfo(message=f"Traversing {traversal_path.group(1).strip()}")
 
         # Phase indicators
         scanning = re.search(r"Now (fingerprinting|hashing|scanning|preprocessing|merging)", line, re.IGNORECASE)

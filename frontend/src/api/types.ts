@@ -9,6 +9,7 @@ export interface Scan {
   scan_depth?: number | null;
   similarity_threshold: number;
   total_files?: number | null;
+  total_dirs?: number | null;
   total_size?: number | null;
   duplicates_found?: number | null;
   space_recoverable?: number | null;
@@ -44,6 +45,8 @@ export interface ScanProgress {
   progress_percent: number | null;
   progress_message: string | null;
   total_files: number | null;
+  total_dirs: number | null;
+  total_size: number | null;
   duplicates_found: number | null;
 }
 

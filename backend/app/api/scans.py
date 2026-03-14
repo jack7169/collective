@@ -131,6 +131,8 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     progress_percent=scan.progress_percent,
                     progress_message=scan.progress_message,
                     total_files=scan.total_files,
+                    total_dirs=scan.total_dirs,
+                    total_size=scan.total_size,
                     duplicates_found=scan.duplicates_found,
                 )
                 await websocket.send_json(progress.model_dump())

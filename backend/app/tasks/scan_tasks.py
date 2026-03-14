@@ -185,6 +185,10 @@ def run_scan_task(scan_id: int):
                             scan.progress_percent = progress.percent
                         if progress.total_files:
                             scan.total_files = progress.total_files
+                        if progress.total_dirs:
+                            scan.total_dirs = progress.total_dirs
+                        if progress.total_size:
+                            scan.total_size = progress.total_size
                         if progress.message:
                             last_parsed_msg = progress.message
 
@@ -252,6 +256,7 @@ def run_scan_task(scan_id: int):
         total_files = 0
         total_size = 0
         duplicates = 0
+        unique_dirs: set[str] = set()
 
         for result in backend.parse_output(output_path):
             if isinstance(result, DuplicateFileResult):
@@ -266,6 +271,7 @@ def run_scan_task(scan_id: int):
                 ))
                 total_files += 1
                 total_size += result.size
+                unique_dirs.add(os.path.dirname(result.path))
                 if not result.is_original:
                     duplicates += 1
             elif isinstance(result, DuplicateDirResult):
@@ -277,6 +283,7 @@ def run_scan_task(scan_id: int):
                     total_size=result.total_size,
                     is_original=result.is_original,
                 ))
+                unique_dirs.add(result.path)
 
         # Bulk insert in batches
         batch_size = 1000
@@ -291,6 +298,7 @@ def run_scan_task(scan_id: int):
         session.commit()
 
         scan.total_files = total_files
+        scan.total_dirs = len(unique_dirs)
         scan.total_size = total_size
         scan.duplicates_found = duplicates
         scan.space_recoverable = sum(

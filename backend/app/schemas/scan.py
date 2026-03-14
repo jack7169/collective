@@ -28,6 +28,7 @@ class ScanResponse(BaseModel):
     scan_depth: Optional[int] = None
     similarity_threshold: float
     total_files: Optional[int] = None
+    total_dirs: Optional[int] = None
     total_size: Optional[int] = None
     duplicates_found: Optional[int] = None
     space_recoverable: Optional[int] = None
@@ -45,6 +46,8 @@ class ScanProgress(BaseModel):
     progress_percent: Optional[float] = None
     progress_message: Optional[str] = None
     total_files: Optional[int] = None
+    total_dirs: Optional[int] = None
+    total_size: Optional[int] = None
     duplicates_found: Optional[int] = None
 
 
