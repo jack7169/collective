@@ -18,6 +18,7 @@ class ScanResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    saved_scan_id: Optional[int] = None
     name: str
     status: str
     scanner: str

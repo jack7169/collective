@@ -198,7 +198,7 @@ export interface FileOpResult {
   message?: string;
 }
 
-// Scheduler types
+// Scheduler types (legacy — kept for compat)
 export interface ScanSchedule {
   id: number;
   name: string;
@@ -212,4 +212,31 @@ export interface ScanSchedule {
   enabled: boolean;
   last_run?: string;
   scheduled_at?: string;
+}
+
+// Saved Scans — persistent scan configs with scheduling
+export interface SavedScan {
+  id: number;
+  name: string;
+  description?: string | null;
+  scanner: string;
+  target_paths: string[];
+  tagged_paths?: string[] | null;
+  scanner_flags?: Record<string, unknown> | null;
+  scan_depth?: number | null;
+  similarity_threshold: number;
+  schedule_enabled: boolean;
+  schedule_interval?: string | null;
+  schedule_interval_value: number;
+  schedule_day_of_week?: number | null;
+  schedule_hour: number;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  last_scan_id?: number | null;
+  total_runs: number;
+  last_total_files?: number | null;
+  last_duplicates_found?: number | null;
+  last_space_recoverable?: number | null;
+  created_at: string;
+  updated_at?: string | null;
 }

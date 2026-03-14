@@ -1,26 +1,22 @@
 """
 Automatic scan scheduler — runs as a standalone process managed by supervisord.
 
-Checks for scheduled scans and enqueues them when due. Supports:
-- Cron-style recurring schedules (daily, weekly, monthly, custom interval)
-- One-shot scheduled scans (run once at a specific time)
-- Scan data cache persistence between container restarts
+Polls the saved_scans table for scheduled scans that are due, creates
+a new Scan run, and enqueues it via Huey. Also updates saved scan stats
+when runs complete.
 """
-import json
 import logging
-import os
 import signal
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import Base
+from app.models.saved_scan import SavedScan
 from app.models.scan import Scan
-from app.models.settings import Setting
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -29,9 +25,6 @@ logging.basicConfig(
 )
 
 POLL_INTERVAL_SECONDS = 60
-SCHEDULE_SETTINGS_KEY = "scan_schedules"
-CACHE_METADATA_KEY = "scan_cache_metadata"
-
 _running = True
 
 
@@ -53,185 +46,135 @@ def _get_session() -> Session:
     return Session(engine)
 
 
-def _get_schedules(session: Session) -> list[dict]:
-    """Load scan schedules from settings table."""
-    result = session.execute(
-        select(Setting).where(Setting.key == SCHEDULE_SETTINGS_KEY)
-    )
-    setting = result.scalar_one_or_none()
-    if not setting:
-        return []
-    try:
-        return json.loads(setting.value)
-    except (json.JSONDecodeError, TypeError):
-        return []
+def _compute_next_run(saved: SavedScan) -> datetime | None:
+    if not saved.schedule_enabled or not saved.schedule_interval:
+        return None
+    base = saved.last_run_at or datetime.now(timezone.utc)
+    hour = saved.schedule_hour or 3
+    val = saved.schedule_interval_value or 1
 
-
-def _save_schedules(session: Session, schedules: list[dict]):
-    """Save scan schedules to settings table."""
-    result = session.execute(
-        select(Setting).where(Setting.key == SCHEDULE_SETTINGS_KEY)
-    )
-    setting = result.scalar_one_or_none()
-    value = json.dumps(schedules)
-    if setting:
-        setting.value = value
-        setting.updated_at = datetime.now(timezone.utc)
+    if saved.schedule_interval == "hourly":
+        nxt = base + timedelta(hours=val)
+    elif saved.schedule_interval == "daily":
+        nxt = base + timedelta(days=val)
+        nxt = nxt.replace(hour=hour, minute=0, second=0, microsecond=0)
+    elif saved.schedule_interval == "weekly":
+        nxt = base + timedelta(weeks=val)
+        nxt = nxt.replace(hour=hour, minute=0, second=0, microsecond=0)
+    elif saved.schedule_interval == "monthly":
+        nxt = base + timedelta(days=30 * val)
+        nxt = nxt.replace(hour=hour, minute=0, second=0, microsecond=0)
     else:
-        session.add(Setting(key=SCHEDULE_SETTINGS_KEY, value=value))
-    session.commit()
+        return None
+    return nxt
 
 
-def _is_scan_due(schedule: dict, now: datetime) -> bool:
-    """Check if a schedule is due to run."""
-    if not schedule.get("enabled", True):
+def _is_due(saved: SavedScan, now: datetime) -> bool:
+    if not saved.schedule_enabled:
         return False
-
-    last_run_str = schedule.get("last_run")
-    interval_type = schedule.get("interval", "daily")
-    interval_value = schedule.get("interval_value", 1)
-
-    if last_run_str:
-        last_run = datetime.fromisoformat(last_run_str)
-    else:
-        # Never run before — run now
+    if saved.next_run_at and now >= saved.next_run_at:
         return True
-
-    if interval_type == "hourly":
-        next_run = last_run + timedelta(hours=interval_value)
-    elif interval_type == "daily":
-        next_run = last_run + timedelta(days=interval_value)
-    elif interval_type == "weekly":
-        next_run = last_run + timedelta(weeks=interval_value)
-    elif interval_type == "monthly":
-        next_run = last_run + timedelta(days=30 * interval_value)
-    elif interval_type == "once":
-        scheduled_at_str = schedule.get("scheduled_at")
-        if not scheduled_at_str:
-            return False
-        scheduled_at = datetime.fromisoformat(scheduled_at_str)
-        return now >= scheduled_at and not last_run_str
-    else:
-        return False
-
-    return now >= next_run
+    if not saved.last_run_at and saved.schedule_enabled:
+        return True  # never run, schedule enabled — run now
+    return False
 
 
-def _enqueue_scheduled_scan(session: Session, schedule: dict):
-    """Create a new scan from a schedule definition and enqueue it."""
-    from app.tasks.scan_tasks import run_scan_task
+def _update_completed_stats(session: Session):
+    """Update saved_scan stats from recently completed runs."""
+    # Find saved scans whose last_scan_id points to a completed scan
+    # but whose cached stats are stale
+    saved_scans = session.execute(
+        select(SavedScan).where(SavedScan.last_scan_id.is_not(None))
+    ).scalars().all()
 
-    scan = Scan(
-        name=schedule.get("name", f"Scheduled scan - {datetime.now(timezone.utc).isoformat()}"),
-        scanner=schedule.get("scanner", "rmlint"),
-        target_paths=schedule.get("target_paths", []),
-        tagged_paths=schedule.get("tagged_paths"),
-        scanner_flags=schedule.get("scanner_flags"),
-        scan_depth=schedule.get("scan_depth"),
-        similarity_threshold=schedule.get("similarity_threshold", 50.0),
-        status="pending",
-    )
-    session.add(scan)
-    session.commit()
-
-    logger.info("Created scheduled scan %d: %s", scan.id, scan.name)
-    run_scan_task(scan.id)
-
-
-def _update_scan_cache_metadata(session: Session):
-    """
-    Update cache metadata to track scan data persistence.
-    Records which scans have cached data available for quick re-analysis
-    without re-scanning disk.
-    """
-    settings = get_settings()
-    cache_dir = os.path.join(settings.CONFIG_DIR, "cache")
-    os.makedirs(cache_dir, exist_ok=True)
-
-    # Find completed scans
-    result = session.execute(
-        select(Scan).where(Scan.status == "completed")
-    )
-    completed_scans = result.scalars().all()
-
-    cache_meta = []
-    for scan in completed_scans:
-        cache_meta.append({
-            "scan_id": scan.id,
-            "name": scan.name,
-            "scanner": scan.scanner,
-            "target_paths": scan.target_paths,
-            "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
-            "total_files": scan.total_files,
-            "duplicates_found": scan.duplicates_found,
-            "space_recoverable": scan.space_recoverable,
-            "has_file_data": True,
-            "has_similarity_data": True,
-        })
-
-    result = session.execute(
-        select(Setting).where(Setting.key == CACHE_METADATA_KEY)
-    )
-    setting = result.scalar_one_or_none()
-    value = json.dumps(cache_meta)
-    if setting:
-        setting.value = value
-        setting.updated_at = datetime.now(timezone.utc)
-    else:
-        session.add(Setting(key=CACHE_METADATA_KEY, value=value))
-    session.commit()
+    for saved in saved_scans:
+        scan = session.get(Scan, saved.last_scan_id)
+        if not scan or scan.status != "completed":
+            continue
+        # Update cached stats if they differ
+        if (saved.last_total_files != scan.total_files
+                or saved.last_duplicates_found != scan.duplicates_found
+                or saved.last_space_recoverable != scan.space_recoverable):
+            saved.last_total_files = scan.total_files
+            saved.last_duplicates_found = scan.duplicates_found
+            saved.last_space_recoverable = scan.space_recoverable
+            session.commit()
 
 
 def run_scheduler():
     """Main scheduler loop."""
     logger.info("Collective scheduler starting")
-    settings = get_settings()
 
     while _running:
         try:
             session = _get_session()
-
-            # Check for due schedules
-            schedules = _get_schedules(session)
             now = datetime.now(timezone.utc)
-            modified = False
 
-            for schedule in schedules:
-                if _is_scan_due(schedule, now):
-                    # Check no scan is currently running
-                    running = session.execute(
-                        select(Scan).where(Scan.status.in_(["running", "parsing", "analyzing"]))
-                    ).scalar_one_or_none()
+            # Check for due saved scans
+            due_scans = session.execute(
+                select(SavedScan).where(SavedScan.schedule_enabled == True)  # noqa: E712
+            ).scalars().all()
 
-                    if running:
-                        logger.info(
-                            "Skipping scheduled scan '%s' — scan %d is still running",
-                            schedule.get("name", "unnamed"),
-                            running.id,
-                        )
-                        continue
+            for saved in due_scans:
+                if not _is_due(saved, now):
+                    continue
 
-                    logger.info("Triggering scheduled scan: %s", schedule.get("name"))
-                    _enqueue_scheduled_scan(session, schedule)
-                    schedule["last_run"] = now.isoformat()
-                    modified = True
+                # Check no scan is currently running (one at a time for HDD perf)
+                running = session.execute(
+                    select(Scan).where(
+                        Scan.status.in_(["running", "parsing", "analyzing", "pending"])
+                    )
+                ).scalars().first()
 
-                    # Disable one-shot schedules after execution
-                    if schedule.get("interval") == "once":
-                        schedule["enabled"] = False
+                if running:
+                    logger.info(
+                        "Skipping scheduled '%s' — scan %d is still %s",
+                        saved.name, running.id, running.status
+                    )
+                    continue
 
-            if modified:
-                _save_schedules(session, schedules)
+                # Create a new scan run
+                logger.info("Triggering scheduled scan: %s (saved_scan %d)", saved.name, saved.id)
+                scan = Scan(
+                    saved_scan_id=saved.id,
+                    name=saved.name,
+                    scanner=saved.scanner,
+                    target_paths=saved.target_paths,
+                    tagged_paths=saved.tagged_paths,
+                    scanner_flags=saved.scanner_flags,
+                    scan_depth=saved.scan_depth,
+                    similarity_threshold=saved.similarity_threshold,
+                    status="pending",
+                )
+                session.add(scan)
+                session.commit()
 
-            # Periodically update cache metadata
-            _update_scan_cache_metadata(session)
+                saved.last_run_at = now
+                saved.last_scan_id = scan.id
+                saved.total_runs += 1
+                saved.next_run_at = _compute_next_run(saved)
+                session.commit()
+
+                # Enqueue
+                try:
+                    from app.tasks.scan_tasks import run_scan_task
+                    run_scan_task(scan.id)
+                    logger.info("Enqueued scan %d for saved_scan %d", scan.id, saved.id)
+                except Exception as e:
+                    logger.error("Failed to enqueue: %s", e)
+                    scan.status = "failed"
+                    scan.error_message = str(e)
+                    session.commit()
+
+            # Update stats for completed runs
+            _update_completed_stats(session)
 
             session.close()
 
         except Exception:
             logger.exception("Scheduler error")
 
-        # Sleep in small increments to allow clean shutdown
+        # Sleep in small increments for clean shutdown
         for _ in range(POLL_INTERVAL_SECONDS):
             if not _running:
                 break

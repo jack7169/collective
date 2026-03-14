@@ -6,6 +6,7 @@ class Scan(Base):
     __tablename__ = "scans"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    saved_scan_id = Column(Integer, nullable=True)  # links to saved_scans.id
     name = Column(String, nullable=False)
     status = Column(String, default="pending", nullable=False)
     scanner = Column(String, default="rmlint", nullable=False)
