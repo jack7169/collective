@@ -19,7 +19,7 @@ interface PathPickerProps {
 }
 
 export function PathPicker({ selectedPaths, onChange }: PathPickerProps) {
-  const [currentPath, setCurrentPath] = useState("/data");
+  const [currentPath, setCurrentPath] = useState("/mnt/user");
   const { data, isLoading } = useBrowse(currentPath);
 
   const pathParts = currentPath.split("/").filter(Boolean);
@@ -45,7 +45,7 @@ export function PathPicker({ selectedPaths, onChange }: PathPickerProps) {
           variant="ghost"
           size="sm"
           className="h-7 px-2 shrink-0"
-          onClick={() => navigateTo("/")}
+          onClick={() => navigateTo("/mnt/user")}
         >
           <Home className="h-3.5 w-3.5" />
         </Button>

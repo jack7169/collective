@@ -22,11 +22,15 @@ export interface Scan {
 }
 
 export interface ScanStats {
+  scan_id: number;
   total_files: number;
-  total_size: number;
-  duplicates_found: number;
+  total_duplicates: number;
   space_recoverable: number;
-  top_groups: Array<{ checksum: string; size: number; count: number }>;
+  similar_directory_pairs: number;
+  top_groups_by_size: Array<{ group_id: string; file_count: number; total_size: number }>;
+  scan_status: string;
+  scan_total_files: number | null;
+  scan_total_size: number | null;
 }
 
 export interface CreateScanRequest {
@@ -50,18 +54,25 @@ export interface ScanProgress {
   duplicates_found: number | null;
 }
 
-export interface DuplicateGroup {
-  id: string;
-  checksum: string;
-  size: number;
-  files: DuplicateFile[];
+export interface DuplicateDirectory {
+  id: number;
+  scan_id: number;
+  group_id: string;
+  path: string;
+  file_count: number;
+  total_size: number;
+  is_original: boolean;
 }
 
 export interface DuplicateFile {
+  id: number;
+  scan_id: number;
+  checksum: string;
   path: string;
   size: number;
-  mtime: string;
+  mtime: number | null;
   is_original: boolean;
+  group_id: string | null;
 }
 
 export interface DirectorySimilarity {

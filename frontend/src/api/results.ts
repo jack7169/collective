@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { get, post } from "./client";
 import type {
-  DuplicateGroup,
+  DuplicateDirectory,
   DirectorySimilarity,
   DirectorySimilarityFilters,
   DuplicateFile,
@@ -17,8 +17,8 @@ export function useDuplicateDirs(scanId: string | undefined, page = 1) {
   return useQuery({
     queryKey: ["scans", scanId, "duplicate-dirs", page],
     queryFn: () =>
-      get<PaginatedResponse<DuplicateGroup>>(
-        `/scans/${scanId}/duplicate-dirs?page=${page}&per_page=20`
+      get<PaginatedResponse<DuplicateDirectory>>(
+        `/scans/${scanId}/duplicate-dirs?page=${page}&per_page=200`
       ),
     enabled: !!scanId,
   });

@@ -10,18 +10,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/browse", tags=["browse"])
 
 
+def _allowed_roots() -> list[str]:
+    """Return all directories the user is allowed to browse."""
+    settings = get_settings()
+    roots = [os.path.realpath(settings.DATA_DIR)]
+    for p in settings.BROWSE_PATHS.split(","):
+        p = p.strip()
+        if p:
+            roots.append(os.path.realpath(p))
+    return roots
+
+
 @router.get("")
 async def browse_directory(path: Optional[str] = Query(None)):
     settings = get_settings()
-    data_dir = os.path.realpath(settings.DATA_DIR)
+    allowed = _allowed_roots()
 
     if path is None:
-        target = data_dir
+        target = allowed[0]
     else:
         target = os.path.realpath(path)
 
-    if not target.startswith(data_dir):
-        raise HTTPException(status_code=403, detail="Access denied: path is outside DATA_DIR")
+    if not any(target == root or target.startswith(root + os.sep) for root in allowed):
+        raise HTTPException(status_code=403, detail="Access denied: path is outside allowed directories")
 
     if not os.path.isdir(target):
         raise HTTPException(status_code=404, detail="Directory not found")
@@ -60,8 +71,14 @@ async def browse_directory(path: Optional[str] = Query(None)):
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied reading directory")
 
+    # Allow navigating up only if parent is still within an allowed root
+    parent = os.path.dirname(target)
+    parent_allowed = any(
+        parent == root or parent.startswith(root + os.sep) for root in allowed
+    )
+
     return {
         "path": target,
-        "parent": os.path.dirname(target) if target != data_dir else None,
+        "parent": parent if parent_allowed else None,
         "entries": entries,
     }

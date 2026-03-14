@@ -8,6 +8,7 @@ import { ScanResults } from "@/pages/ScanResults";
 import { SimilarDirectories } from "@/pages/SimilarDirectories";
 import { DirectoryCompare } from "@/pages/DirectoryCompare";
 import { ActionsLog } from "@/pages/ActionsLog";
+import { SavedScans } from "@/pages/SavedScans";
 import { Settings } from "@/pages/Settings";
 
 const queryClient = new QueryClient({
@@ -28,6 +29,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/scans/new" element={<NewScan />} />
+            <Route path="/scans/saved" element={<SavedScans />} />
             <Route path="/scans/:id" element={<ScanResults />} />
             <Route path="/scans/:id/progress" element={<ScanProgress />} />
             <Route path="/scans/:id/similar" element={<SimilarDirectories />} />

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useScan, useScanStats, useDeleteScan } from "@/api/scans";
 import { useDuplicateDirs, useDuplicateFiles } from "@/api/results";
+import type { DuplicateDirectory } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -167,36 +168,44 @@ export function ScanResults() {
         <TabsContent value="duplicates">
           {dupDirsData?.items && dupDirsData.items.length > 0 ? (
             <div className="space-y-4">
-              {dupDirsData.items.map((group) => (
-                <Card key={group.id}>
+              {Object.entries(
+                dupDirsData.items.reduce<Record<string, DuplicateDirectory[]>>(
+                  (groups, dir) => {
+                    (groups[dir.group_id] ??= []).push(dir);
+                    return groups;
+                  },
+                  {}
+                )
+              ).map(([groupId, dirs]) => (
+                <Card key={groupId}>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-mono">
-                        {group.checksum.slice(0, 16)}...
+                        Group {groupId.slice(0, 12)}...
                       </CardTitle>
                       <Badge variant="outline">
-                        {formatBytes(group.size)} x {group.files.length}
+                        {formatBytes(dirs[0].total_size)} x {dirs.length} dirs
                       </Badge>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      {group.files.map((file) => (
+                      {dirs.map((dir) => (
                         <div
-                          key={file.path}
+                          key={dir.path}
                           className="flex items-center justify-between rounded px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors"
                         >
                           <span className="font-mono text-xs truncate max-w-[70%]">
-                            {file.path}
+                            {dir.path}
                           </span>
                           <div className="flex items-center gap-2">
-                            {file.is_original && (
+                            {dir.is_original && (
                               <Badge variant="success" className="text-xs">
                                 original
                               </Badge>
                             )}
                             <span className="text-xs text-muted-foreground">
-                              {formatBytes(file.size)}
+                              {dir.file_count} files · {formatBytes(dir.total_size)}
                             </span>
                           </div>
                         </div>
@@ -261,7 +270,9 @@ export function ScanResults() {
                           {formatBytes(file.size)}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {formatDate(file.mtime)}
+                          {file.mtime
+                            ? formatDate(new Date(file.mtime * 1000).toISOString())
+                            : "—"}
                         </TableCell>
                         <TableCell>
                           {file.is_original ? (

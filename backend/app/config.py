@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///config/collective.db"
     CONFIG_DIR: str = "/config"
     DATA_DIR: str = "/data"
+    BROWSE_PATHS: str = "/mnt/user"  # comma-separated list of additional browsable roots
     LOG_LEVEL: str = "INFO"
     SCANNER_DEFAULT: Literal["rmlint", "fclones"] = "rmlint"
     SIMILARITY_THRESHOLD: float = 50.0
