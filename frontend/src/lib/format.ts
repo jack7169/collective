@@ -18,7 +18,9 @@ export function formatPercent(n: number): string {
 
 export function formatDate(date: string): string {
   try {
-    return formatDistanceToNow(parseISO(date), { addSuffix: true });
+    // Backend returns naive UTC datetimes — ensure they're parsed as UTC
+    const normalized = date.endsWith("Z") || date.includes("+") ? date : date + "Z";
+    return formatDistanceToNow(parseISO(normalized), { addSuffix: true });
   } catch {
     return date;
   }
