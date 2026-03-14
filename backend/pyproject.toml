@@ -1,0 +1,40 @@
+[project]
+name = "collective"
+version = "0.1.0"
+description = "Duplicate directory detection and consolidation for Unraid"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Collective Contributors"},
+]
+dependencies = [
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.2",
+    "sqlalchemy[asyncio]==2.0.41",
+    "aiosqlite==0.21.0",
+    "alembic==1.15.2",
+    "pydantic==2.11.3",
+    "pydantic-settings==2.9.1",
+    "huey==2.5.2",
+    "websockets==15.0.1",
+    "python-multipart==0.0.20",
+    "httptools==0.6.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

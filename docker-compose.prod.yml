@@ -1,0 +1,15 @@
+services:
+  collective:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - /mnt/user/appdata/collective:/config
+      - /mnt/user:/data:ro
+    environment:
+      - PUID=99
+      - PGID=100
+    restart: unless-stopped
+    mem_limit: 2g

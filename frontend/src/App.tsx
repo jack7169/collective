@@ -1,0 +1,42 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Layout } from "@/components/layout/Layout";
+import { Dashboard } from "@/pages/Dashboard";
+import { NewScan } from "@/pages/NewScan";
+import { ScanProgress } from "@/pages/ScanProgress";
+import { ScanResults } from "@/pages/ScanResults";
+import { SimilarDirectories } from "@/pages/SimilarDirectories";
+import { DirectoryCompare } from "@/pages/DirectoryCompare";
+import { ActionsLog } from "@/pages/ActionsLog";
+import { Settings } from "@/pages/Settings";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 2,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/scans/new" element={<NewScan />} />
+            <Route path="/scans/:id" element={<ScanResults />} />
+            <Route path="/scans/:id/progress" element={<ScanProgress />} />
+            <Route path="/scans/:id/similar" element={<SimilarDirectories />} />
+            <Route path="/scans/:id/compare" element={<DirectoryCompare />} />
+            <Route path="/actions" element={<ActionsLog />} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}

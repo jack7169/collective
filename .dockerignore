@@ -1,0 +1,11 @@
+.git
+.github
+__pycache__
+*.pyc
+node_modules
+.env
+*.egg-info
+.pytest_cache
+.mypy_cache
+config/
+test-data/

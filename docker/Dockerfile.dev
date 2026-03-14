@@ -1,0 +1,26 @@
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    rmlint rsync tini curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Try to install fclones (non-fatal if fails)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+      curl -L "https://github.com/pkolaczk/fclones/releases/download/v0.34.0/fclones-0.34.0-linux-gnu-x86_64.tar.gz" | tar xz -C /usr/local/bin/ || true; \
+    fi
+
+WORKDIR /app
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+ENV PYTHONPATH=/app/backend
+ENV COLLECTIVE_ENV=development
+ENV COLLECTIVE_CONFIG_DIR=/config
+ENV COLLECTIVE_DATA_DIR=/data
+ENV COLLECTIVE_LOG_LEVEL=DEBUG
+ENV COLLECTIVE_DATABASE_URL=sqlite+aiosqlite:////config/collective.db
+
+EXPOSE 8080
+ENTRYPOINT ["tini", "--"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/backend"]

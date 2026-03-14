@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app/backend
+      - ./config:/config
+      - ${SCAN_DATA_PATH:-./test-data}:/data:ro
+    environment:
+      - COLLECTIVE_ENV=development
+      - COLLECTIVE_LOG_LEVEL=DEBUG
+      - COLLECTIVE_DATABASE_URL=sqlite+aiosqlite:////config/collective.db
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm run dev -- --host"
+    environment:
+      - VITE_API_URL=http://localhost:8080
+
+  huey:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    command: ["huey_consumer", "app.tasks.worker.huey", "-w", "1", "-k", "thread", "-C"]
+    volumes:
+      - ./backend:/app/backend
+      - ./config:/config
+      - ${SCAN_DATA_PATH:-./test-data}:/data:ro
+    environment:
+      - COLLECTIVE_ENV=development
+      - COLLECTIVE_LOG_LEVEL=DEBUG
+      - COLLECTIVE_DATABASE_URL=sqlite+aiosqlite:////config/collective.db

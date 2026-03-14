@@ -1,0 +1,215 @@
+export interface Scan {
+  id: number;
+  name: string;
+  status: "pending" | "running" | "parsing" | "analyzing" | "completed" | "failed" | "cancelled";
+  scanner: "rmlint" | "fclones";
+  target_paths: string[];
+  tagged_paths?: string[] | null;
+  scanner_flags?: Record<string, unknown> | null;
+  scan_depth?: number | null;
+  similarity_threshold: number;
+  total_files?: number | null;
+  total_size?: number | null;
+  duplicates_found?: number | null;
+  space_recoverable?: number | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error_message?: string | null;
+  created_at: string;
+  progress_percent?: number | null;
+  progress_message?: string | null;
+}
+
+export interface ScanStats {
+  total_files: number;
+  total_size: number;
+  duplicates_found: number;
+  space_recoverable: number;
+  top_groups: Array<{ checksum: string; size: number; count: number }>;
+}
+
+export interface CreateScanRequest {
+  name: string;
+  scanner: "rmlint" | "fclones";
+  target_paths: string[];
+  tagged_paths?: string[];
+  scan_depth?: number;
+  similarity_threshold?: number;
+  scanner_flags?: Record<string, unknown>;
+}
+
+export interface ScanProgress {
+  scan_id: number;
+  status: string;
+  progress_percent: number | null;
+  progress_message: string | null;
+  total_files: number | null;
+  duplicates_found: number | null;
+}
+
+export interface DuplicateGroup {
+  id: string;
+  checksum: string;
+  size: number;
+  files: DuplicateFile[];
+}
+
+export interface DuplicateFile {
+  path: string;
+  size: number;
+  mtime: string;
+  is_original: boolean;
+}
+
+export interface DirectorySimilarity {
+  id: number;
+  scan_id: number;
+  dir_a: string;
+  dir_b: string;
+  files_a: number;
+  files_b: number;
+  shared_files: number;
+  shared_size: number;
+  size_a: number;
+  size_b: number;
+  jaccard_similarity: number;
+  a_subset_pct: number;
+  b_subset_pct: number;
+  structural_similarity?: number | null;
+  unique_to_a: number;
+  unique_to_b: number;
+  relationship?: string | null;
+}
+
+export interface DirectorySimilarityFilters {
+  min_similarity?: number;
+  sort_by?: string;
+  sort_order?: "asc" | "desc";
+  relationship?: string;
+  page?: number;
+  per_page?: number;
+}
+
+export interface CompareResult {
+  dir_a: string;
+  dir_b: string;
+  shared_files: CompareFile[];
+  only_in_a: CompareFile[];
+  only_in_b: CompareFile[];
+  shared_size: number;
+  only_a_size: number;
+  only_b_size: number;
+}
+
+export interface CompareFile {
+  name: string;
+  path: string;
+  size: number;
+  mtime: string;
+  checksum: string;
+}
+
+export interface Action {
+  id: number;
+  scan_id?: number | null;
+  similarity_id?: number | null;
+  action_type: string;
+  source_path: string;
+  dest_path?: string | null;
+  status: "planned" | "dry_run" | "confirmed" | "executing" | "completed" | "failed";
+  dry_run_output?: string | null;
+  files_affected?: number | null;
+  bytes_affected?: number | null;
+  error_message?: string | null;
+  notes?: string | null;
+  created_at: string;
+  executed_at?: string | null;
+}
+
+export interface CreateActionRequest {
+  scan_id?: number;
+  action_type: string;
+  source_path: string;
+  dest_path?: string;
+  notes?: string;
+}
+
+export interface BrowseResult {
+  path: string;
+  entries: BrowseEntry[];
+}
+
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  mtime: string;
+}
+
+export interface SystemHealth {
+  status: string;
+  scanners: Record<string, boolean>;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+// Tree diff types for side-by-side directory comparison
+export interface TreeDiffNode {
+  name: string;
+  status: "both" | "only_a" | "only_b";
+  is_dir: boolean;
+  size_a?: number;
+  size_b?: number;
+  match?: "size_match" | "name_only";
+  similarity?: number;
+  children?: TreeDiffNode[];
+}
+
+export interface TreeDiffResult {
+  dir_a: string;
+  dir_b: string;
+  tree: TreeDiffNode[];
+  stats: {
+    both: number;
+    only_a: number;
+    only_b: number;
+  };
+}
+
+// File operations for filesystem management
+export interface FileOperation {
+  operation: "move" | "copy" | "delete" | "hardlink" | "symlink";
+  source_path: string;
+  dest_path?: string;
+}
+
+export interface FileOpResult {
+  source: string;
+  dest?: string;
+  operation: string;
+  status: "success" | "error" | "dry_run";
+  message?: string;
+}
+
+// Scheduler types
+export interface ScanSchedule {
+  id: number;
+  name: string;
+  scanner: "rmlint" | "fclones";
+  target_paths: string[];
+  tagged_paths?: string[];
+  interval: "hourly" | "daily" | "weekly" | "monthly" | "once";
+  interval_value: number;
+  similarity_threshold: number;
+  scan_depth?: number;
+  enabled: boolean;
+  last_run?: string;
+  scheduled_at?: string;
+}
