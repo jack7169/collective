@@ -1,19 +1,18 @@
 import { Link } from "react-router-dom";
 import {
   ScanSearch,
-  FolderSync,
   HardDrive,
   Activity,
   Plus,
   ArrowRight,
   Clock,
+  Files,
 } from "lucide-react";
 import { useScans } from "@/api/scans";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -28,6 +27,14 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "s
   cancelled: "outline",
 };
 
+const statusColors: Record<string, string> = {
+  pending: "bg-gray-500",
+  running: "bg-blue-500",
+  completed: "bg-green-500",
+  failed: "bg-red-500",
+  cancelled: "bg-yellow-500",
+};
+
 export function Dashboard() {
   const { data: scansData, isLoading } = useScans();
   const scans = scansData?.items ?? [];
@@ -35,8 +42,8 @@ export function Dashboard() {
   const totalScans = scansData?.total ?? 0;
   const activeScans = scans.filter((s) => s.status === "running").length;
   const completedScans = scans.filter((s) => s.status === "completed");
-  const totalDuplicates = completedScans.reduce(
-    (sum, s) => sum + (s.duplicates_found ?? 0),
+  const totalFilesScanned = completedScans.reduce(
+    (sum, s) => sum + (s.total_files ?? 0),
     0
   );
   const totalRecoverable = completedScans.reduce(
@@ -49,135 +56,177 @@ export function Dashboard() {
       label: "Total Scans",
       value: formatNumber(totalScans),
       icon: ScanSearch,
-      color: "text-primary",
+      borderColor: "border-l-blue-500",
+      iconColor: "text-blue-500",
     },
     {
-      label: "Duplicates Found",
-      value: formatNumber(totalDuplicates),
-      icon: FolderSync,
-      color: "text-orange-400",
+      label: "Files Scanned",
+      value: formatNumber(totalFilesScanned),
+      icon: Files,
+      borderColor: "border-l-green-500",
+      iconColor: "text-green-500",
     },
     {
       label: "Space Recoverable",
       value: formatBytes(totalRecoverable),
       icon: HardDrive,
-      color: "text-success",
+      borderColor: "border-l-amber-500",
+      iconColor: "text-amber-500",
     },
     {
       label: "Active Scans",
       value: formatNumber(activeScans),
       icon: Activity,
-      color: "text-warning",
+      borderColor: "border-l-cyan-500",
+      iconColor: "text-cyan-500",
     },
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Overview of your duplicate detection scans
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Overview of your storage analysis
           </p>
         </div>
-        <Button asChild size="lg">
+        <Button asChild>
           <Link to="/scans/new">
-            <Plus className="h-5 w-5" />
+            <Plus className="h-4 w-4" />
             New Scan
           </Link>
         </Button>
       </div>
 
-      {/* Stat cards */}
+      {/* Summary cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
-            <Card key={stat.label}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardDescription className="text-sm font-medium">
-                  {stat.label}
-                </CardDescription>
-                <Icon className={`h-5 w-5 ${stat.color}`} />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
+            <Card key={stat.label} className={`border-l-4 ${stat.borderColor}`}>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      {stat.label}
+                    </p>
+                    <p className="text-2xl font-bold mt-1">{stat.value}</p>
+                  </div>
+                  <Icon className={`h-5 w-5 ${stat.iconColor}`} />
+                </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
 
-      {/* Recent scans */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Scans</CardTitle>
-          <CardDescription>
-            Your latest duplicate detection scans
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-              Loading scans...
-            </div>
-          ) : scans.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <ScanSearch className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground mb-4">
-                No scans yet. Start your first scan to find duplicates.
-              </p>
-              <Button asChild>
-                <Link to="/scans/new">
-                  <Plus className="h-4 w-4" />
-                  Create First Scan
-                </Link>
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {scans.slice(0, 10).map((scan) => (
-                <Link
-                  key={scan.id}
-                  to={
-                    scan.status === "running"
-                      ? `/scans/${scan.id}/progress`
-                      : `/scans/${scan.id}`
-                  }
-                  className="flex items-center justify-between rounded-lg border border-border p-4 transition-colors hover:bg-accent/50"
-                >
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <div className="font-medium">{scan.name}</div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mt-0.5">
-                        <Clock className="h-3.5 w-3.5" />
-                        {formatDate(scan.created_at)}
-                        <span className="text-border">|</span>
-                        <span className="capitalize">{scan.scanner}</span>
+      {/* Two-column layout */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Recent Scans — 2/3 width */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Recent Scans</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                Loading scans...
+              </div>
+            ) : scans.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <ScanSearch className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground mb-4">
+                  No scans yet. Start your first scan to find duplicates.
+                </p>
+                <Button asChild>
+                  <Link to="/scans/new">
+                    <Plus className="h-4 w-4" />
+                    Create First Scan
+                  </Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {scans.slice(0, 8).map((scan) => (
+                  <Link
+                    key={scan.id}
+                    to={
+                      scan.status === "running"
+                        ? `/scans/${scan.id}/progress`
+                        : `/scans/${scan.id}`
+                    }
+                    className="flex items-center justify-between rounded-lg border border-border p-3 transition-colors hover:bg-accent/50 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`h-2 w-2 rounded-full shrink-0 ${statusColors[scan.status] ?? "bg-gray-500"}`}
+                      />
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm truncate">
+                          {scan.name}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          {formatDate(scan.created_at)}
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            {scan.scanner}
+                          </Badge>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {scan.duplicates_found != null && (
-                      <div className="text-right text-sm text-muted-foreground hidden sm:block">
-                        <div>
-                          {formatNumber(scan.duplicates_found)} duplicates
-                        </div>
-                        <div>{formatBytes(scan.space_recoverable ?? 0)} recoverable</div>
-                      </div>
-                    )}
-                    <Badge variant={statusVariant[scan.status] ?? "secondary"}>
-                      {scan.status}
-                    </Badge>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Badge variant={statusVariant[scan.status] ?? "secondary"} className="text-xs">
+                        {scan.status}
+                      </Badge>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Quick Actions — 1/3 width */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Quick Actions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button asChild variant="outline" className="w-full justify-start">
+              <Link to="/scans/new">
+                <Plus className="h-4 w-4" />
+                New Scan
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="w-full justify-start">
+              <Link to="/actions">
+                <Activity className="h-4 w-4" />
+                Actions Log
+              </Link>
+            </Button>
+            {completedScans.length > 0 && (
+              <div className="pt-3 border-t border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                  Latest Completed
+                </p>
+                {completedScans.slice(0, 3).map((scan) => (
+                  <Link
+                    key={scan.id}
+                    to={`/scans/${scan.id}`}
+                    className="flex items-center justify-between py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span className="truncate">{scan.name}</span>
+                    <ArrowRight className="h-3 w-3 shrink-0" />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

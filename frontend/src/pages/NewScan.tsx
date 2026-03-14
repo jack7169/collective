@@ -57,10 +57,10 @@ export function NewScan() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">New Scan</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-2xl font-bold tracking-tight">New Scan</h1>
+        <p className="text-sm text-muted-foreground mt-1">
           Select directories to scan for duplicates. You can tag originals and
           fine-tune similarity after the scan completes.
         </p>
@@ -70,7 +70,7 @@ export function NewScan() {
         {/* Scan name */}
         <Card>
           <CardHeader>
-            <CardTitle>Scan Name</CardTitle>
+            <CardTitle className="text-base">Scan Name</CardTitle>
             <CardDescription>
               Give this scan a descriptive name
             </CardDescription>
@@ -80,6 +80,7 @@ export function NewScan() {
               placeholder="e.g., Media server cleanup"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              className="h-10"
               required
             />
           </CardContent>
@@ -88,7 +89,7 @@ export function NewScan() {
         {/* Path picker */}
         <Card>
           <CardHeader>
-            <CardTitle>Scan Paths</CardTitle>
+            <CardTitle className="text-base">Scan Paths</CardTitle>
             <CardDescription>
               Select directories to scan for duplicates
             </CardDescription>
@@ -110,7 +111,7 @@ export function NewScan() {
               onClick={() => setShowAdvanced(!showAdvanced)}
             >
               <div className="text-left">
-                <CardTitle>Advanced Options</CardTitle>
+                <CardTitle className="text-base">Advanced Options</CardTitle>
                 <CardDescription>
                   Scanner engine, depth, and custom flags
                 </CardDescription>

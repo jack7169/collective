@@ -32,6 +32,14 @@ import { StatsCards } from "@/components/results/StatsCards";
 import { formatBytes, formatDate, formatNumber } from "@/lib/format";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
+const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
+  completed: "success",
+  failed: "destructive",
+  cancelled: "warning",
+  running: "secondary",
+  pending: "secondary",
+};
+
 export function ScanResults() {
   const { id } = useParams<{ id: string }>();
   const { data: scan, isLoading: scanLoading } = useScan(id);
@@ -66,8 +74,13 @@ export function ScanResults() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{scan.name}</h1>
-          <p className="text-muted-foreground mt-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">{scan.name}</h1>
+            <Badge variant={statusBadgeVariant[scan.status] ?? "secondary"}>
+              {scan.status}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
             Scanned {formatDate(scan.created_at)} using {scan.scanner}
           </p>
         </div>
@@ -105,33 +118,33 @@ export function ScanResults() {
             {/* Scan details */}
             <Card>
               <CardHeader>
-                <CardTitle>Scan Details</CardTitle>
+                <CardTitle className="text-base">Scan Details</CardTitle>
               </CardHeader>
               <CardContent>
                 <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                   <div>
-                    <dt className="text-sm text-muted-foreground">Scanner</dt>
-                    <dd className="font-medium capitalize">{scan.scanner}</dd>
+                    <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Scanner</dt>
+                    <dd className="font-medium capitalize mt-1">{scan.scanner}</dd>
                   </div>
                   <div>
-                    <dt className="text-sm text-muted-foreground">Status</dt>
-                    <dd>
-                      <Badge variant="success">{scan.status}</Badge>
+                    <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</dt>
+                    <dd className="mt-1">
+                      <Badge variant={statusBadgeVariant[scan.status] ?? "secondary"}>{scan.status}</Badge>
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-sm text-muted-foreground">Paths</dt>
-                    <dd className="font-medium">{scan.target_paths.length}</dd>
+                    <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Paths</dt>
+                    <dd className="font-medium mt-1">{scan.target_paths.length}</dd>
                   </div>
                   <div>
-                    <dt className="text-sm text-muted-foreground">Created</dt>
-                    <dd className="font-medium">
+                    <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Created</dt>
+                    <dd className="font-medium mt-1">
                       {formatDate(scan.created_at)}
                     </dd>
                   </div>
                 </dl>
                 <div className="mt-4">
-                  <dt className="text-sm text-muted-foreground mb-2">
+                  <dt className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
                     Scanned Paths
                   </dt>
                   <div className="space-y-1">
@@ -171,7 +184,7 @@ export function ScanResults() {
                       {group.files.map((file) => (
                         <div
                           key={file.path}
-                          className="flex items-center justify-between rounded px-3 py-1.5 text-sm hover:bg-muted/50"
+                          className="flex items-center justify-between rounded px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors"
                         >
                           <span className="font-mono text-xs truncate max-w-[70%]">
                             {file.path}
@@ -231,7 +244,7 @@ export function ScanResults() {
               <CardContent className="pt-6">
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="hover:bg-transparent">
                       <TableHead>Path</TableHead>
                       <TableHead className="w-24">Size</TableHead>
                       <TableHead className="w-32">Modified</TableHead>
@@ -240,7 +253,7 @@ export function ScanResults() {
                   </TableHeader>
                   <TableBody>
                     {dupFilesData.items.map((file, i) => (
-                      <TableRow key={`${file.path}-${i}`}>
+                      <TableRow key={`${file.path}-${i}`} className="hover:bg-accent/50">
                         <TableCell className="font-mono text-xs truncate max-w-md">
                           {file.path}
                         </TableCell>

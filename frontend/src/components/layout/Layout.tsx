@@ -16,7 +16,7 @@ export function Layout() {
       <div
         className={cn(
           "flex flex-col transition-all duration-300",
-          sidebarCollapsed ? "ml-16" : "ml-56"
+          sidebarCollapsed ? "ml-16" : "ml-60"
         )}
       >
         <TopBar />

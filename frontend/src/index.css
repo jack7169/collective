@@ -1,33 +1,34 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0a0a0f;
-  --color-foreground: #e4e4e7;
-  --color-card: #111118;
-  --color-card-foreground: #e4e4e7;
-  --color-popover: #111118;
-  --color-popover-foreground: #e4e4e7;
-  --color-primary: #6366f1;
+  --color-background: #0f0f0f;
+  --color-foreground: #fafafa;
+  --color-card: #1a1a1a;
+  --color-card-foreground: #fafafa;
+  --color-popover: #1a1a1a;
+  --color-popover-foreground: #fafafa;
+  --color-primary: #2563eb;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #1e1e2e;
+  --color-secondary: #27272a;
   --color-secondary-foreground: #a1a1aa;
-  --color-muted: #18181f;
-  --color-muted-foreground: #71717a;
-  --color-accent: #1e1e2e;
-  --color-accent-foreground: #e4e4e7;
-  --color-destructive: #ef4444;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #1e293b;
+  --color-accent-foreground: #f8fafc;
+  --color-destructive: #dc2626;
   --color-destructive-foreground: #ffffff;
-  --color-border: #27272a;
-  --color-input: #27272a;
-  --color-ring: #6366f1;
-  --color-success: #22c55e;
-  --color-warning: #eab308;
+  --color-border: #3f3f46;
+  --color-input: #3f3f46;
+  --color-ring: #2563eb;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-info: #0891b2;
   --radius: 0.5rem;
 }
 
 body {
   @apply bg-background text-foreground antialiased;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 /* Custom scrollbar for dark theme */

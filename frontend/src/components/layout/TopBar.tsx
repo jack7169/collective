@@ -1,11 +1,12 @@
 import { useLocation, Link } from "react-router-dom";
-import { ChevronRight, Activity } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useSystemHealth } from "@/hooks/useBrowse";
 import { cn } from "@/lib/utils";
 
 const routeNames: Record<string, string> = {
   "/": "Dashboard",
   "/scans/new": "New Scan",
+  "/scans/saved": "Saved Scans",
   "/actions": "Actions Log",
   "/settings": "Settings",
 };
@@ -52,8 +53,10 @@ export function TopBar() {
   const { data: health } = useSystemHealth();
   const breadcrumbs = getBreadcrumbs(location.pathname);
 
+  const isHealthy = health?.status === "ok";
+
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur-sm">
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card px-6">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-1.5 text-sm">
         {breadcrumbs.map((crumb, i) => (
@@ -77,18 +80,18 @@ export function TopBar() {
         ))}
       </nav>
 
-      {/* Right side indicators */}
-      <div className="flex items-center gap-4">
+      {/* Right side — system status */}
+      <div className="flex items-center gap-2">
         {health && (
-          <div className="flex items-center gap-1.5">
-            <Activity
+          <div className="flex items-center gap-2 text-sm">
+            <span
               className={cn(
-                "h-4 w-4",
-                health.status === "ok" ? "text-success" : "text-warning"
+                "h-2 w-2 rounded-full",
+                isHealthy ? "bg-success" : "bg-destructive"
               )}
             />
-            <span className="text-xs text-muted-foreground capitalize">
-              {health.status}
+            <span className="text-muted-foreground">
+              {isHealthy ? "Healthy" : "Error"}
             </span>
           </div>
         )}

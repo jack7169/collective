@@ -128,10 +128,10 @@ export function SimilarDirectories() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
+          <h1 className="text-2xl font-bold tracking-tight">
             Similar Directories
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Adjust the threshold slider to filter noise. Tag originals to
             classify keeper copies.
           </p>
@@ -215,13 +215,13 @@ export function SimilarDirectories() {
         </Card>
       )}
 
-      {/* Filter bar — dynamic post-scan threshold */}
+      {/* Filter bar */}
       <Card>
         <CardHeader className="pb-4">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <CardTitle className="text-sm">
-              Filters — adjust to remove noise
+              Filters
             </CardTitle>
           </div>
         </CardHeader>
@@ -326,7 +326,7 @@ export function SimilarDirectories() {
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="hover:bg-transparent">
                       <TableHead>Directory A</TableHead>
                       <TableHead>Directory B</TableHead>
                       <TableHead
@@ -364,7 +364,7 @@ export function SimilarDirectories() {
                   </TableHeader>
                   <TableBody>
                     {data.items.map((pair) => (
-                      <TableRow key={pair.id}>
+                      <TableRow key={pair.id} className="hover:bg-accent/50">
                         <TableCell>
                           <div>
                             <div className="font-mono text-xs truncate max-w-[200px]">
