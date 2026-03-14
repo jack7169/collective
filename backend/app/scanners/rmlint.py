@@ -111,8 +111,17 @@ class RmlintBackend(ScannerBackend):
         if not line:
             return None
 
-        # rmlint -g progress bar: "Traversing /path [====    ] 45%" or similar
-        traversing = re.search(r"Traversing\s+'?([^']+)'?", line)
+        # rmlint traversal: "Traversing (17629 usable files / 0 + 0 ignored files / folders)"
+        traversing_count = re.search(r"Traversing\s*\((\d+)\s+usable files", line)
+        if traversing_count:
+            count = int(traversing_count.group(1))
+            return ScanProgressInfo(
+                message=f"Traversing: {count:,} files found",
+                total_files=count,
+            )
+
+        # Simple traversing path
+        traversing = re.search(r"Traversing\s+'?([^'(]+)'?", line)
         if traversing:
             return ScanProgressInfo(message=f"Traversing {traversing.group(1).strip()}")
 

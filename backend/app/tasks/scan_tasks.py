@@ -83,31 +83,49 @@ def run_scan_task(scan_id: int):
         # Run subprocess
         try:
             import threading
-            import shlex
+            import pty
+            import select
             import re as _re
 
-            # Use `script` for PTY so rmlint outputs its progress bar
-            pty_cmd = ["script", "-qc", shlex.join(cmd), "/dev/null"]
+            # Use Python's pty module so rmlint thinks it has a terminal
+            # and outputs its progress bar in real-time
+            master_fd, slave_fd = pty.openpty()
+
+            # Set terminal size so rmlint progress bar renders
+            import struct, fcntl, termios
+            winsize = struct.pack("HHHH", 24, 80, 0, 0)
+            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+
             proc = subprocess.Popen(
-                pty_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                cmd,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
             )
+            os.close(slave_fd)
 
             scan.progress_message = f"Starting {scan.scanner} on {', '.join(scan.target_paths)}..."
             session.commit()
 
-            # Background thread reads output, splits on \r and \n
+            # Background thread reads PTY output
             output_lines: list[str] = []
             _lock = threading.Lock()
 
             def _reader():
                 buf = ""
-                stream = proc.stdout
-                assert stream is not None
                 while True:
-                    chunk = stream.read(512)
-                    if not chunk:
+                    try:
+                        ready, _, _ = select.select([master_fd], [], [], 1.0)
+                        if not ready:
+                            if proc.poll() is not None:
+                                break
+                            continue
+                        chunk = os.read(master_fd, 4096)
+                        if not chunk:
+                            break
+                    except OSError:
+                        # EIO = slave closed (process exited) — normal
                         break
                     text = chunk.decode("utf-8", errors="replace")
                     buf += text
@@ -119,9 +137,8 @@ def run_scan_task(scan_id: int):
                                 idx = i
                         if idx < 0:
                             break
-                        line = buf[:idx].strip()
+                        line = buf[:idx]
                         buf = buf[idx + 1:]
-                        # Strip ANSI escape codes inline
                         line = _re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", line)
                         line = _re.sub(r"\x1b\[\?[0-9]*[a-zA-Z]", "", line)
                         line = line.strip()
@@ -153,10 +170,14 @@ def run_scan_task(scan_id: int):
                     new_lines = list(output_lines)
                     output_lines.clear()
 
+                last_parsed_msg = None
                 for line in new_lines:
-                    log_buffer.append(line)
-                    if len(log_buffer) > 20:
-                        log_buffer.pop(0)
+                    # Strip spinner/box-drawing chars for cleaner log
+                    clean = _re.sub(r"[▕▏░▒▓█]+", "", line).strip()
+                    if clean:
+                        log_buffer.append(clean)
+                        if len(log_buffer) > 30:
+                            log_buffer.pop(0)
 
                     progress = backend.parse_progress(line)
                     if progress:
@@ -164,27 +185,39 @@ def run_scan_task(scan_id: int):
                             scan.progress_percent = progress.percent
                         if progress.total_files:
                             scan.total_files = progress.total_files
+                        if progress.message:
+                            last_parsed_msg = progress.message
 
-                # Build progress message from log buffer + elapsed time
+                # Build progress message
                 elapsed_min = poll_count // 60
                 elapsed_sec = poll_count % 60
                 time_str = f"{elapsed_min}m {elapsed_sec}s" if elapsed_min > 0 else f"{elapsed_sec}s"
 
-                if log_buffer:
-                    # Show last few meaningful lines + elapsed
-                    recent = "\n".join(log_buffer[-5:])
-                    scan.progress_message = f"[{time_str}] {recent}"
+                if last_parsed_msg:
+                    scan.progress_message = f"[{time_str}] {last_parsed_msg}"
+                elif log_buffer:
+                    # Deduplicate and show last unique lines
+                    seen = []
+                    for l in reversed(log_buffer):
+                        if l not in seen:
+                            seen.append(l)
+                        if len(seen) >= 5:
+                            break
+                    seen.reverse()
+                    scan.progress_message = f"[{time_str}]\n" + "\n".join(seen)
                 else:
                     scan.progress_message = f"Scanner running... {time_str} elapsed"
 
                 session.commit()
 
             reader_thread.join(timeout=5)
-
-            stderr_thread.join(timeout=5)
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
 
             if proc.returncode not in (0, None):
-                stderr_out = b"".join([] ).decode() if not stderr_lines else "\n".join(stderr_lines)
+                stderr_out = "\n".join(log_buffer) if log_buffer else ""
                 # rmlint returns non-zero when it finds duplicates, which is expected
                 if scan.scanner == "rmlint" and proc.returncode in (1, 2):
                     logger.info("rmlint returned %d (found duplicates)", proc.returncode)
