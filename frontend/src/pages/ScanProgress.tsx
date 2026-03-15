@@ -36,6 +36,7 @@ const phaseConfig: Record<
   analyzing: { icon: BarChart3, label: "Analyzing Similarities", color: "text-cyan-400", chipColor: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20" },
   completed: { icon: CheckCircle2, label: "Completed", color: "text-success", chipColor: "bg-green-500/10 text-green-400 border-green-500/20" },
   failed: { icon: XCircle, label: "Failed", color: "text-destructive", chipColor: "bg-red-500/10 text-red-400 border-red-500/20" },
+  cancelled: { icon: XCircle, label: "Cancelled", color: "text-muted-foreground", chipColor: "bg-muted text-muted-foreground border-border" },
 };
 
 export function ScanProgress() {
@@ -49,12 +50,18 @@ export function ScanProgress() {
   const rawStatus = progress?.status ?? scan?.status ?? "pending";
   const phase = rawStatus === "running" ? "hashing" : rawStatus;
 
-  // Auto-navigate when completed
+  // Auto-navigate when completed or cancelled
   useEffect(() => {
     if (rawStatus === "completed") {
       const timer = setTimeout(() => {
         navigate(`/scans/${id}`, { replace: true });
       }, 2000);
+      return () => clearTimeout(timer);
+    }
+    if (rawStatus === "cancelled") {
+      const timer = setTimeout(() => {
+        navigate("/", { replace: true });
+      }, 1500);
       return () => clearTimeout(timer);
     }
   }, [rawStatus, id, navigate]);
@@ -192,7 +199,7 @@ export function ScanProgress() {
       </Card>
 
       {/* Cancel button */}
-      {phase !== "completed" && phase !== "failed" && (
+      {phase !== "completed" && phase !== "failed" && rawStatus !== "cancelled" && (
         <div className="flex justify-center">
           <Button
             variant="outline"
@@ -200,12 +207,17 @@ export function ScanProgress() {
             onClick={() => {
               if (id) cancelScan.mutate(id);
             }}
-            disabled={cancelScan.isPending}
+            disabled={cancelScan.isPending || cancelScan.isSuccess}
           >
             <XCircle className="h-4 w-4" />
-            {cancelScan.isPending ? "Cancelling..." : "Cancel Scan"}
+            {cancelScan.isPending || cancelScan.isSuccess ? "Cancelling..." : "Cancel Scan"}
           </Button>
         </div>
+      )}
+      {rawStatus === "cancelled" && (
+        <p className="text-center text-sm text-muted-foreground">
+          Scan cancelled. Redirecting to dashboard...
+        </p>
       )}
     </div>
   );
