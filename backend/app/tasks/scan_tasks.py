@@ -172,14 +172,6 @@ def run_scan_task(scan_id: int):
 
                 last_parsed_msg = None
                 for line in new_lines:
-                    # Strip spinner/box-drawing/progress bar chars for cleaner log
-                    clean = _re.sub(r"[▕▏░▒▓█<=>[\]|#\-]+", "", line).strip()
-                    # Only log meaningful lines (skip progress bar animations)
-                    if clean and len(clean) > 5 and not _re.match(r"^\d+/\d+:.*\d+$", clean):
-                        log_buffer.append(clean)
-                        if len(log_buffer) > 30:
-                            log_buffer.pop(0)
-
                     progress = backend.parse_progress(line)
                     if progress:
                         if progress.percent is not None:
@@ -192,6 +184,13 @@ def run_scan_task(scan_id: int):
                             scan.total_size = progress.total_size
                         if progress.message:
                             last_parsed_msg = progress.message
+                    else:
+                        # Only non-progress lines go in the log buffer
+                        clean = _re.sub(r"[▕▏░▒▓█<=>[\]|#\-]+", "", line).strip()
+                        if clean and len(clean) > 5:
+                            log_buffer.append(clean)
+                            if len(log_buffer) > 30:
+                                log_buffer.pop(0)
 
                 # Build progress message
                 elapsed_min = poll_count // 60
