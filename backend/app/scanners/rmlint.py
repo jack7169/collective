@@ -28,6 +28,7 @@ class RmlintBackend(ScannerBackend):
             "--no-with-color",
             "-o", f"json:{output_path}",
             "-T", "none +dd +df",
+            "-a", "xxhash",          # fast non-crypto hash (10x+ faster than blake2b)
         ]
 
         if extra_flags:
