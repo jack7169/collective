@@ -100,32 +100,59 @@ class FclonesBackend(ScannerBackend):
                 )
 
     def parse_progress(self, line: str) -> Optional[ScanProgressInfo]:
+        # Strip ANSI escape codes and progress bar animation chars
+        line = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", line)
+        line = re.sub(r"\x1b\[\?[0-9]*[a-zA-Z]", "", line)
         line = line.strip()
+        if not line:
+            return None
 
-        scanned = re.match(r"Scanned\s+(\d+)\s+files?", line, re.IGNORECASE)
-        if scanned:
-            count = int(scanned.group(1))
+        # fclones progress bar: "01/6: Scanning files  [<===>  ]  12345"
+        step_match = re.match(
+            r"(\d+)/(\d+):\s*(.+?)\s*\[.*?\]\s*(\d+)", line
+        )
+        if step_match:
+            step = int(step_match.group(1))
+            total_steps = int(step_match.group(2))
+            phase = step_match.group(3).strip()
+            count = int(step_match.group(4))
+            # Estimate percent from step (each step ~equal weight)
+            pct = ((step - 1) / total_steps) * 100
             return ScanProgressInfo(
-                message=f"Scanned {count} files",
-                total_files=count,
+                percent=round(pct, 1),
+                message=f"Step {step}/{total_steps}: {phase} ({count:,} files)",
+                total_files=count if step == 1 else None,
             )
 
-        hashing = re.match(r"Hashing.*?(\d+)%", line)
-        if hashing:
-            pct = float(hashing.group(1))
-            return ScanProgressInfo(percent=pct, message=f"Hashing files ({pct:.0f}%)")
+        # fclones percentage: "50.3%" or "Hashing 50%"
+        pct_match = re.search(r"(\d+(?:\.\d+)?)\s*%", line)
+        if pct_match:
+            pct = float(pct_match.group(1))
+            return ScanProgressInfo(percent=pct, message=line[:100])
 
-        grouping = re.match(r"Found\s+(\d+)\s+group", line, re.IGNORECASE)
-        if grouping:
-            count = int(grouping.group(1))
-            return ScanProgressInfo(message=f"Found {count} duplicate groups")
+        # fclones log: "[timestamp] fclones: info: Found 56 (28.2 GB) files..."
+        info_match = re.search(r"fclones:\s*\w+:\s*(.+)", line)
+        if info_match:
+            msg = info_match.group(1).strip()
+            # Extract file counts from info messages
+            found_match = re.search(r"Found\s+([\d,]+)\s+\(([\d.]+\s*\w+)\)", msg)
+            if found_match:
+                count = int(found_match.group(1).replace(",", ""))
+                return ScanProgressInfo(message=msg, total_files=count)
+            scanned_match = re.search(r"Scanned\s+([\d,]+)", msg)
+            if scanned_match:
+                count = int(scanned_match.group(1).replace(",", ""))
+                return ScanProgressInfo(message=msg, total_files=count)
+            redundant_match = re.search(r"Found\s+([\d,]+)\s+.+?redundant", msg)
+            if redundant_match:
+                return ScanProgressInfo(percent=99.0, message=msg)
+            return ScanProgressInfo(message=msg)
 
-        progress_pct = re.match(r"(\d+(?:\.\d+)?)%", line)
-        if progress_pct:
-            pct = float(progress_pct.group(1))
-            return ScanProgressInfo(percent=pct, message=line)
+        # Skip pure progress bar fragments
+        if re.match(r"^[\s\[\]<=>\-|#.]+$", line):
+            return None
+        # Skip "Initializing" and other very short lines
+        if len(line) < 4:
+            return None
 
-        if line:
-            return ScanProgressInfo(message=line)
-
-        return None
+        return ScanProgressInfo(message=line[:100])

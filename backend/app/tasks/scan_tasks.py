@@ -172,9 +172,10 @@ def run_scan_task(scan_id: int):
 
                 last_parsed_msg = None
                 for line in new_lines:
-                    # Strip spinner/box-drawing chars for cleaner log
-                    clean = _re.sub(r"[▕▏░▒▓█]+", "", line).strip()
-                    if clean:
+                    # Strip spinner/box-drawing/progress bar chars for cleaner log
+                    clean = _re.sub(r"[▕▏░▒▓█<=>[\]|#\-]+", "", line).strip()
+                    # Only log meaningful lines (skip progress bar animations)
+                    if clean and len(clean) > 5 and not _re.match(r"^\d+/\d+:.*\d+$", clean):
                         log_buffer.append(clean)
                         if len(log_buffer) > 30:
                             log_buffer.pop(0)
