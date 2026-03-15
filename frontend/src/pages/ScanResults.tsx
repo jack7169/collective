@@ -7,8 +7,10 @@ import {
   BarChart3,
   ArrowRight,
   Trash2,
+  BookmarkPlus,
+  BookmarkCheck,
 } from "lucide-react";
-import { useScan, useScanStats, useDeleteScan } from "@/api/scans";
+import { useScan, useScanStats, useDeleteScan, useSaveFromScan } from "@/api/scans";
 import { useDuplicateDirs, useDuplicateFiles } from "@/api/results";
 import type { DuplicateDirectory } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -49,6 +51,7 @@ export function ScanResults() {
   const [filesPage, setFilesPage] = useState(1);
   const { data: dupFilesData } = useDuplicateFiles(id, filesPage);
   const deleteScan = useDeleteScan();
+  const saveFromScan = useSaveFromScan();
   const [showDelete, setShowDelete] = useState(false);
 
   if (scanLoading) {
@@ -86,6 +89,22 @@ export function ScanResults() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {scan.status === "completed" && !scan.saved_scan_id && (
+            <Button
+              variant="outline"
+              onClick={() => saveFromScan.mutate(scan.id)}
+              disabled={saveFromScan.isPending}
+            >
+              <BookmarkPlus className="h-4 w-4" />
+              Save Scan
+            </Button>
+          )}
+          {scan.saved_scan_id && (
+            <Badge variant="secondary" className="gap-1 py-1.5 px-3">
+              <BookmarkCheck className="h-3.5 w-3.5" />
+              Saved
+            </Badge>
+          )}
           <Button asChild variant="outline">
             <Link to={`/scans/${id}/similar`}>
               <FolderSync className="h-4 w-4" />

@@ -1,5 +1,6 @@
 export interface Scan {
   id: number;
+  saved_scan_id?: number | null;
   name: string;
   status: "pending" | "running" | "parsing" | "analyzing" | "completed" | "failed" | "cancelled";
   scanner: "rmlint" | "fclones";
