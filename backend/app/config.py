@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     DATA_DIR: str = "/data"
     BROWSE_PATHS: str = "/mnt/user"  # comma-separated list of additional browsable roots
     LOG_LEVEL: str = "INFO"
-    SCANNER_DEFAULT: Literal["rmlint", "fclones"] = "rmlint"
+    SCANNER_DEFAULT: Literal["rmlint", "fclones"] = "fclones"
     SIMILARITY_THRESHOLD: float = 50.0
     SCAN_DEPTH: int = 3
     HOST: str = "0.0.0.0"

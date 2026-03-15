@@ -32,7 +32,7 @@ export function NewScan() {
   const [name, setName] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [scanner, setScanner] = useState<"rmlint" | "fclones">("rmlint");
+  const [scanner, setScanner] = useState<"rmlint" | "fclones">("fclones");
   const [depth, setDepth] = useState(5);
   const [customFlags, setCustomFlags] = useState("");
 

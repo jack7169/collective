@@ -18,15 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install fclones (non-fatal — app works without it, rmlint is primary)
+# Install fclones — multi-threaded duplicate finder (uses all CPU cores)
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
-      curl -fsSL "https://github.com/pkolaczk/fclones/releases/download/v0.34.0/fclones-0.34.0-linux-x86_64-gnu.tar.gz" -o /tmp/fclones.tar.gz && \
-      tar xzf /tmp/fclones.tar.gz -C /usr/local/bin/ && rm /tmp/fclones.tar.gz; \
+      curl -fsSL "https://github.com/pkolaczk/fclones/releases/download/v0.35.0/fclones-0.35.0-linux-glibc-x86_64.tar.gz" -o /tmp/fclones.tar.gz; \
     elif [ "$ARCH" = "arm64" ]; then \
-      curl -fsSL "https://github.com/pkolaczk/fclones/releases/download/v0.34.0/fclones-0.34.0-linux-aarch64-gnu.tar.gz" -o /tmp/fclones.tar.gz && \
-      tar xzf /tmp/fclones.tar.gz -C /usr/local/bin/ && rm /tmp/fclones.tar.gz; \
-    fi || echo "WARNING: fclones installation failed, continuing without it"
+      curl -fsSL "https://github.com/pkolaczk/fclones/releases/download/v0.35.0/fclones-0.35.0-linux-glibc-aarch64.tar.gz" -o /tmp/fclones.tar.gz; \
+    fi && tar xzf /tmp/fclones.tar.gz -C / && rm /tmp/fclones.tar.gz \
+    || echo "WARNING: fclones installation failed, continuing without it"
 
 # Install Python dependencies
 WORKDIR /app

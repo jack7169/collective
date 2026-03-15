@@ -34,7 +34,6 @@ class FclonesBackend(ScannerBackend):
             "--cache",
             "-f", "json",
             "-o", output_path,
-            "--threads", "0",  # 0 = auto-detect, use all available cores
         ])
 
         if len(all_paths) > 1:
