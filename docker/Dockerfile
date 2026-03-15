@@ -45,12 +45,12 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV PYTHONPATH=/app/backend
-ENV COLLECTIVE_CONFIG_DIR=/config
+ENV COLLECTIVE_CONFIG_DIR=/data
 ENV COLLECTIVE_DATA_DIR=/data
-ENV COLLECTIVE_DATABASE_URL=sqlite+aiosqlite:////config/collective.db
+ENV COLLECTIVE_DATABASE_URL=sqlite+aiosqlite:////data/collective.db
 
 EXPOSE 8080
-VOLUME ["/config", "/data"]
+VOLUME ["/data"]
 
 ENTRYPOINT ["tini", "--"]
 CMD ["/entrypoint.sh"]

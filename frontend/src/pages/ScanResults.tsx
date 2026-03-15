@@ -45,11 +45,12 @@ const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" |
 
 export function ScanResults() {
   const { id } = useParams<{ id: string }>();
-  const { data: scan, isLoading: scanLoading } = useScan(id);
-  const { data: stats } = useScanStats(id);
-  const { data: dupDirsData } = useDuplicateDirs(id);
+  const { data: scan, isLoading: scanLoading, isError: scanError } = useScan(id);
+  const scanExists = !!scan;
+  const { data: stats } = useScanStats(scanExists ? id : undefined);
+  const { data: dupDirsData } = useDuplicateDirs(scanExists ? id : undefined);
   const [filesPage, setFilesPage] = useState(1);
-  const { data: dupFilesData } = useDuplicateFiles(id, filesPage);
+  const { data: dupFilesData } = useDuplicateFiles(scanExists ? id : undefined, filesPage);
   const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
   const [showDelete, setShowDelete] = useState(false);
@@ -62,10 +63,12 @@ export function ScanResults() {
     );
   }
 
-  if (!scan) {
+  if (!scan || scanError) {
     return (
       <div className="flex flex-col items-center justify-center py-24">
-        <p className="text-muted-foreground mb-4">Scan not found</p>
+        <p className="text-muted-foreground mb-4">
+          {scanError ? "This scan no longer exists or could not be loaded." : "Scan not found"}
+        </p>
         <Button asChild variant="outline">
           <Link to="/">Back to Dashboard</Link>
         </Button>

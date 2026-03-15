@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Create config directories
-mkdir -p /config/logs /config/cache /config/scan_output
+# Create data directories (DB, logs, cache all in /data for persistence)
+mkdir -p /data/logs /data/cache /data/scan_output
 
 # Handle PUID/PGID for Unraid
 PUID=${PUID:-99}
@@ -16,7 +16,7 @@ if [ "$PUID" != "0" ]; then
         GROUP_NAME=$(getent group "$PGID" | cut -d: -f1)
         adduser --uid "$PUID" --ingroup "${GROUP_NAME:-users}" --disabled-password --gecos "" collective 2>/dev/null || true
     fi
-    chown -R "$PUID:$PGID" /config
+    chown -R "$PUID:$PGID" /data
 fi
 
 exec supervisord -c /etc/supervisor/conf.d/supervisord.conf

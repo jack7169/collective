@@ -65,7 +65,8 @@ class RmlintBackend(ScannerBackend):
                 continue
 
             if entry_type in ("duplicate_dir", "original_dir"):
-                if entry_type == "original_dir":
+                is_orig = entry.get("is_original", entry_type == "original_dir")
+                if is_orig:
                     group_counter += 1
                     current_group_id = f"dir_{group_counter}"
 
@@ -74,11 +75,12 @@ class RmlintBackend(ScannerBackend):
                     path=entry.get("path", ""),
                     file_count=entry.get("n_children", 0),
                     total_size=entry.get("size", 0),
-                    is_original=(entry_type == "original_dir"),
+                    is_original=is_orig,
                 )
 
             elif entry_type in ("duplicate_file", "original"):
-                if entry_type == "original":
+                is_orig = entry.get("is_original", entry_type == "original")
+                if is_orig:
                     group_counter += 1
                     current_group_id = f"file_{group_counter}"
 
@@ -88,7 +90,7 @@ class RmlintBackend(ScannerBackend):
                     path=entry.get("path", ""),
                     size=entry.get("size", 0),
                     mtime=entry.get("mtime", None),
-                    is_original=(entry_type == "original"),
+                    is_original=is_orig,
                     group_id=current_group_id or f"file_{group_counter}",
                 )
 

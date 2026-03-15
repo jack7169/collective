@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     COLLECTIVE_ENV: str = "production"
     DATABASE_URL: str = "sqlite+aiosqlite:///config/collective.db"
-    CONFIG_DIR: str = "/config"
+    CONFIG_DIR: str = "/data"
     DATA_DIR: str = "/data"
     BROWSE_PATHS: str = "/mnt/user"  # comma-separated list of additional browsable roots
     LOG_LEVEL: str = "INFO"
