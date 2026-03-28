@@ -54,6 +54,8 @@ export interface ScanProgress {
   total_dirs: number | null;
   total_size: number | null;
   duplicates_found: number | null;
+  elapsed_seconds: number | null;
+  started_at: string | null;
 }
 
 export interface DuplicateDirectory {

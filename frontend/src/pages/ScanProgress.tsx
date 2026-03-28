@@ -13,6 +13,8 @@ import {
   Layers,
   AlertTriangle,
   RotateCcw,
+  Clock,
+  Timer,
 } from "lucide-react";
 import { useScanProgress } from "@/api/websocket";
 import { useScan, useCancelScan, useResumeScan } from "@/api/scans";
@@ -41,6 +43,24 @@ const phaseConfig: Record<
   cancelled: { icon: XCircle, label: "Cancelled", color: "text-muted-foreground", chipColor: "bg-muted text-muted-foreground border-border" },
   interrupted: { icon: AlertTriangle, label: "Interrupted", color: "text-amber-400", chipColor: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
 };
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h ${rm}m`;
+}
+
+function estimateRemaining(elapsed: number, percent: number): string | null {
+  if (percent <= 1 || elapsed < 10) return null; // Not enough data
+  const totalEstimated = (elapsed / percent) * 100;
+  const remaining = Math.max(0, Math.round(totalEstimated - elapsed));
+  if (remaining < 5) return "< 5s";
+  return `~${formatElapsed(remaining)}`;
+}
 
 export function ScanProgress() {
   const { id } = useParams<{ id: string }>();
@@ -73,6 +93,7 @@ export function ScanProgress() {
   const phaseInfo = phaseConfig[phase] ?? phaseConfig["hashing"]!;
   const PhaseIcon = phaseInfo.icon;
   const percent = progress?.progress_percent ?? scan?.progress_percent ?? 0;
+  const elapsed = progress?.elapsed_seconds ?? null;
   const isActive = ["running", "parsing", "analyzing", "pending"].includes(rawStatus);
 
   // Show "--" for metrics that aren't available yet during active scans
@@ -84,6 +105,8 @@ export function ScanProgress() {
     if (isActive) return "--";
     return formatter(0);
   }
+
+  const eta = elapsed != null && percent > 0 ? estimateRemaining(elapsed, percent) : null;
 
   const metricCards = [
     {
@@ -138,7 +161,7 @@ export function ScanProgress() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {phase !== "completed" && phase !== "failed" ? (
+                {phase !== "completed" && phase !== "failed" && phase !== "interrupted" ? (
                   <Loader2 className={cn("h-5 w-5 animate-spin", phaseInfo.color)} />
                 ) : (
                   <PhaseIcon className={cn("h-5 w-5", phaseInfo.color)} />
@@ -166,6 +189,26 @@ export function ScanProgress() {
                       : "[&>div]:bg-green-500"
               )}
             />
+
+            {/* Elapsed time + ETA bar */}
+            {(elapsed != null || eta) && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3" />
+                  <span className="tabular-nums">
+                    Elapsed: {elapsed != null ? formatElapsed(elapsed) : "--"}
+                  </span>
+                </div>
+                {eta && (
+                  <div className="flex items-center gap-1.5">
+                    <Timer className="h-3 w-3" />
+                    <span className="tabular-nums">
+                      Remaining: {eta}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

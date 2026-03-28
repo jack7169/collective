@@ -164,6 +164,13 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     await websocket.send_json({"error": "Scan not found"})
                     break
 
+                from datetime import datetime, timezone
+                elapsed = None
+                if scan.started_at:
+                    now = datetime.now(timezone.utc)
+                    started = scan.started_at if scan.started_at.tzinfo else scan.started_at.replace(tzinfo=timezone.utc)
+                    elapsed = int((now - started).total_seconds())
+
                 progress = ScanProgress(
                     scan_id=scan.id,
                     status=scan.status,
@@ -173,6 +180,8 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     total_dirs=scan.total_dirs,
                     total_size=scan.total_size,
                     duplicates_found=scan.duplicates_found,
+                    elapsed_seconds=elapsed,
+                    started_at=scan.started_at,
                 )
                 await websocket.send_json(progress.model_dump())
 
