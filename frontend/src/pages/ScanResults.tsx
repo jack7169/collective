@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   Files,
   FolderSync,
@@ -10,8 +10,10 @@ import {
   BookmarkPlus,
   BookmarkCheck,
   Layers,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
-import { useScan, useScanStats, useDeleteScan, useSaveFromScan } from "@/api/scans";
+import { useScan, useScanStats, useDeleteScan, useSaveFromScan, useRetryScan } from "@/api/scans";
 import { useDuplicateDirs } from "@/api/results";
 import type { DuplicateDirectory } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -47,8 +49,10 @@ export function ScanResults() {
   const scanExists = !!scan;
   const { data: stats } = useScanStats(scanExists ? id : undefined);
   const { data: dupDirsData } = useDuplicateDirs(scanExists ? id : undefined);
+  const navigate = useNavigate();
   const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
+  const retryScan = useRetryScan();
   const [showDelete, setShowDelete] = useState(false);
 
   const actionQueue = useActionQueue();
@@ -90,6 +94,19 @@ export function ScanResults() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {(scan.status === "interrupted" || scan.status === "failed" || scan.status === "cancelled") && (
+            <Button
+              onClick={async () => {
+                if (!id) return;
+                const newScan = await retryScan.mutateAsync(id);
+                navigate(`/scans/${newScan.id}/progress`);
+              }}
+              disabled={retryScan.isPending}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {retryScan.isPending ? "Retrying..." : "Retry Scan"}
+            </Button>
+          )}
           {scan.status === "completed" && !scan.saved_scan_id && (
             <Button
               variant="outline"
@@ -122,6 +139,20 @@ export function ScanResults() {
           </Button>
         </div>
       </div>
+
+      {/* Interrupted/failed banner */}
+      {scan.status === "interrupted" && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 flex items-center gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-amber-400">Scan interrupted</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {scan.error_message ?? "This scan was interrupted by a restart."}
+              {scan.total_files != null && ` Progress: ${scan.total_files.toLocaleString()} files scanned.`}
+            </p>
+          </div>
+        </div>
+      )}
 
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList>
