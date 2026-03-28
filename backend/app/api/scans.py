@@ -79,45 +79,43 @@ async def cancel_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
     return ScanResponse.model_validate(scan)
 
 
-@router.post("/{scan_id}/retry", response_model=ScanResponse, status_code=201)
-async def retry_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
-    """Retry an interrupted, failed, or cancelled scan by creating a new scan with the same config."""
+@router.post("/{scan_id}/resume", response_model=ScanResponse)
+async def resume_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
+    """Resume an interrupted scan from where it left off.
+
+    Phase-aware resume:
+    - Interrupted during 'running' → re-runs scanner (fclones cache speeds this up)
+    - Interrupted during 'parsing' → skips scanner, re-parses output file
+    - Interrupted during 'analyzing' → skips scanner+parsing, re-runs analysis
+
+    Progress, name, and config are preserved from the original scan.
+    """
     scan = await ScanService.get_scan(db, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     if scan.status not in ("interrupted", "failed", "cancelled"):
         raise HTTPException(
             status_code=400,
-            detail=f"Can only retry interrupted, failed, or cancelled scans (current: '{scan.status}')"
+            detail=f"Can only resume interrupted, failed, or cancelled scans (current: '{scan.status}')"
         )
 
-    # Clone config into a new scan
-    from app.schemas.scan import ScanCreate
-    new_scan = await ScanService.create_scan(db, ScanCreate(
-        name=f"{scan.name} (retry)",
-        scanner=scan.scanner,
-        target_paths=scan.target_paths,
-        tagged_paths=scan.tagged_paths,
-        scanner_flags=scan.scanner_flags,
-        scan_depth=scan.scan_depth,
-        similarity_threshold=scan.similarity_threshold,
-    ))
-    if scan.saved_scan_id:
-        new_scan.saved_scan_id = scan.saved_scan_id
-        await db.commit()
+    # For failed/cancelled scans that don't have an interrupted_phase, treat as full re-run
+    if not scan.interrupted_phase and scan.status in ("failed", "cancelled"):
+        scan.interrupted_phase = "running"
 
     try:
         from app.tasks.scan_tasks import run_scan_task
-        run_scan_task(new_scan.id)
-        logger.info("Enqueued retry scan %d (from scan %d)", new_scan.id, scan_id)
+        run_scan_task(scan.id)
+        logger.info("Enqueued resume for scan %d (phase: %s)", scan_id, scan.interrupted_phase)
     except Exception as e:
-        logger.error("Failed to enqueue retry scan: %s", e)
-        await ScanService.update_scan_status(
-            db, new_scan.id, "failed", error_message=f"Failed to enqueue: {e}"
-        )
+        logger.error("Failed to enqueue resume: %s", e)
+        scan.status = "failed"
+        scan.error_message = f"Failed to enqueue resume: {e}"
         await db.commit()
 
-    return ScanResponse.model_validate(new_scan)
+    await db.commit()
+    scan = await ScanService.get_scan(db, scan_id)
+    return ScanResponse.model_validate(scan)
 
 
 @router.post("/{scan_id}/reanalyze", response_model=ScanResponse)

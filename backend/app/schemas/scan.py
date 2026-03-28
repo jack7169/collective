@@ -38,6 +38,7 @@ class ScanResponse(BaseModel):
     created_at: datetime
     progress_percent: Optional[float] = None
     progress_message: Optional[str] = None
+    interrupted_phase: Optional[str] = None
 
 
 class ScanProgress(BaseModel):

@@ -60,11 +60,12 @@ export function useCancelScan() {
   });
 }
 
-export function useRetryScan() {
+export function useResumeScan() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => post<Scan>(`/scans/${id}/retry`),
-    onSuccess: () => {
+    mutationFn: (id: string) => post<Scan>(`/scans/${id}/resume`),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["scans", id] });
       queryClient.invalidateQueries({ queryKey: ["scans"] });
     },
   });

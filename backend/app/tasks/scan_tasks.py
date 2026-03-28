@@ -50,11 +50,12 @@ def _sigterm_handler(signum, frame):
             session = _get_sync_session()
             scan = session.get(Scan, _interrupted_scan_id)
             if scan and scan.status in ("running", "parsing", "analyzing"):
+                scan.interrupted_phase = scan.status
                 scan.status = "interrupted"
-                scan.error_message = "Interrupted by shutdown"
+                scan.error_message = f"Interrupted during {scan.interrupted_phase} by shutdown"
                 scan.completed_at = datetime.now(timezone.utc)
                 session.commit()
-                logger.info("Scan %d gracefully interrupted on shutdown", _interrupted_scan_id)
+                logger.info("Scan %d gracefully interrupted during %s", _interrupted_scan_id, scan.interrupted_phase)
             session.close()
         except Exception:
             logger.exception("Failed to mark scan as interrupted on shutdown")
@@ -64,7 +65,12 @@ def _sigterm_handler(signum, frame):
 
 @huey.task()
 def run_scan_task(scan_id: int):
-    """Execute full scan pipeline synchronously (runs in Huey worker)."""
+    """Execute full scan pipeline synchronously (runs in Huey worker).
+
+    Supports phase-aware resume: if a scan was interrupted, it picks up
+    from the phase it was in (running → re-scan with cache, parsing → re-parse,
+    analyzing → re-analyze).
+    """
     global _interrupted_scan_id
     import signal
     prev_handler = signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -81,12 +87,43 @@ def run_scan_task(scan_id: int):
             logger.info("Scan %d was cancelled before starting", scan_id)
             return
 
-        # Update status to running
-        scan.status = "running"
-        scan.started_at = datetime.now(timezone.utc)
-        scan.progress_percent = 0.0
-        scan.progress_message = "Starting scan..."
-        session.commit()
+        # Determine resume phase
+        resume_phase = scan.interrupted_phase if scan.status == "interrupted" else None
+        skip_scanner = False
+        skip_parsing = False
+
+        settings = get_settings()
+        os.makedirs(settings.CONFIG_DIR, exist_ok=True)
+        output_path = os.path.join(settings.CONFIG_DIR, f"scan_{scan_id}_output.json")
+
+        if resume_phase == "analyzing":
+            # Files already in DB, just re-run analysis
+            skip_scanner = True
+            skip_parsing = True
+            logger.info("Scan %d: resuming from analyzing phase", scan_id)
+        elif resume_phase == "parsing" and os.path.exists(output_path):
+            # Output file exists, skip scanner
+            skip_scanner = True
+            logger.info("Scan %d: resuming from parsing phase (output file exists)", scan_id)
+        elif resume_phase:
+            logger.info("Scan %d: resuming from %s phase (re-running scanner with cache)", scan_id, resume_phase)
+
+        # Clear resume state
+        scan.interrupted_phase = None
+        scan.error_message = None
+        scan.completed_at = None
+
+        if not skip_scanner:
+            # Update status to running
+            scan.status = "running"
+            if not scan.started_at:
+                scan.started_at = datetime.now(timezone.utc)
+            if not resume_phase:
+                scan.progress_percent = 0.0
+                scan.progress_message = "Starting scan..."
+            else:
+                scan.progress_message = "Resuming scan (cached hashes will speed this up)..."
+            session.commit()
 
         # Select scanner backend with auto-fallback
         import shutil
@@ -278,78 +315,92 @@ def run_scan_task(scan_id: int):
             session.commit()
             return
 
-        # Parsing phase
-        scan.status = "parsing"
-        scan.progress_percent = 60.0
-        scan.progress_message = "Parsing scanner output..."
-        session.commit()
-
-        if not os.path.exists(output_path):
-            scan.status = "failed"
-            scan.error_message = "Scanner output file not found"
-            scan.completed_at = datetime.now(timezone.utc)
+        if not skip_parsing:
+            # Parsing phase
+            scan.status = "parsing"
+            scan.progress_percent = 60.0
+            scan.progress_message = "Parsing scanner output..."
             session.commit()
-            return
 
-        # Parse output and insert records
-        file_records = []
-        dir_records = []
-        total_files = 0
-        total_size = 0
-        duplicates = 0
-        unique_dirs: set[str] = set()
+            if not os.path.exists(output_path):
+                scan.status = "failed"
+                scan.error_message = "Scanner output file not found"
+                scan.completed_at = datetime.now(timezone.utc)
+                session.commit()
+                return
 
-        for result in backend.parse_output(output_path):
-            if isinstance(result, DuplicateFileResult):
-                file_records.append(DuplicateFile(
-                    scan_id=scan_id,
-                    checksum=result.checksum,
-                    path=result.path,
-                    size=result.size,
-                    mtime=result.mtime,
-                    is_original=result.is_original,
-                    group_id=result.group_id,
-                ))
-                total_files += 1
-                total_size += result.size
-                unique_dirs.add(os.path.dirname(result.path))
-                if not result.is_original:
-                    duplicates += 1
-            elif isinstance(result, DuplicateDirResult):
-                dir_records.append(DuplicateDirectory(
-                    scan_id=scan_id,
-                    group_id=result.group_id,
-                    path=result.path,
-                    file_count=result.file_count,
-                    total_size=result.total_size,
-                    is_original=result.is_original,
-                ))
-                unique_dirs.add(result.path)
+            # Clear any previous partial records (for clean resume)
+            session.execute(
+                delete(DuplicateFile).where(DuplicateFile.scan_id == scan_id)
+            )
+            session.execute(
+                delete(DuplicateDirectory).where(DuplicateDirectory.scan_id == scan_id)
+            )
+            session.commit()
 
-        # Bulk insert in batches
-        batch_size = 1000
-        for i in range(0, len(file_records), batch_size):
-            session.add_all(file_records[i:i + batch_size])
-            session.flush()
+        if not skip_parsing:
+            # Parse output and insert records
+            file_records = []
+            dir_records = []
+            total_files = 0
+            total_size = 0
+            duplicates = 0
+            unique_dirs: set[str] = set()
 
-        for i in range(0, len(dir_records), batch_size):
-            session.add_all(dir_records[i:i + batch_size])
-            session.flush()
+            for result in backend.parse_output(output_path):
+                if isinstance(result, DuplicateFileResult):
+                    file_records.append(DuplicateFile(
+                        scan_id=scan_id,
+                        checksum=result.checksum,
+                        path=result.path,
+                        size=result.size,
+                        mtime=result.mtime,
+                        is_original=result.is_original,
+                        group_id=result.group_id,
+                    ))
+                    total_files += 1
+                    total_size += result.size
+                    unique_dirs.add(os.path.dirname(result.path))
+                    if not result.is_original:
+                        duplicates += 1
+                elif isinstance(result, DuplicateDirResult):
+                    dir_records.append(DuplicateDirectory(
+                        scan_id=scan_id,
+                        group_id=result.group_id,
+                        path=result.path,
+                        file_count=result.file_count,
+                        total_size=result.total_size,
+                        is_original=result.is_original,
+                    ))
+                    unique_dirs.add(result.path)
 
-        session.commit()
+            # Bulk insert in batches
+            batch_size = 1000
+            for i in range(0, len(file_records), batch_size):
+                session.add_all(file_records[i:i + batch_size])
+                session.flush()
 
-        scan.total_files = total_files
-        scan.total_dirs = len(unique_dirs)
-        scan.total_size = total_size
-        scan.duplicates_found = duplicates
-        scan.space_recoverable = sum(
-            r.size for r in file_records if not r.is_original
-        )
+            for i in range(0, len(dir_records), batch_size):
+                session.add_all(dir_records[i:i + batch_size])
+                session.flush()
 
-        # Analysis phase
+            session.commit()
+
+            scan.total_files = total_files
+            scan.total_dirs = len(unique_dirs)
+            scan.total_size = total_size
+            scan.duplicates_found = duplicates
+            scan.space_recoverable = sum(
+                r.size for r in file_records if not r.is_original
+            )
+
+        # Analysis phase — clear old similarities if resuming
         scan.status = "analyzing"
         scan.progress_percent = 80.0
         scan.progress_message = "Computing directory similarities..."
+        session.execute(
+            delete(DirectorySimilarity).where(DirectorySimilarity.scan_id == scan_id)
+        )
         session.commit()
 
         # Run synchronous similarity analysis

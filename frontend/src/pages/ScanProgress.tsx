@@ -15,7 +15,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useScanProgress } from "@/api/websocket";
-import { useScan, useCancelScan, useRetryScan } from "@/api/scans";
+import { useScan, useCancelScan, useResumeScan } from "@/api/scans";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +48,7 @@ export function ScanProgress() {
   const { progress, isConnected } = useScanProgress(id);
   const { data: scan } = useScan(id);
   const cancelScan = useCancelScan();
-  const retryScan = useRetryScan();
+  const resumeScan = useResumeScan();
 
   // Map backend status to display phase
   const rawStatus = progress?.status ?? scan?.status ?? "pending";
@@ -240,39 +240,35 @@ export function ScanProgress() {
           Scan cancelled. Redirecting to dashboard...
         </p>
       )}
-      {/* Interrupted banner with retry */}
+      {/* Interrupted banner with resume */}
       {rawStatus === "interrupted" && (
         <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 text-center space-y-3">
           <p className="text-sm text-amber-400">
-            This scan was interrupted by a restart. Progress was saved but the scan must be re-run.
+            This scan was interrupted. Progress has been saved and the scan will resume from where it left off.
           </p>
           <Button
-            onClick={async () => {
-              if (!id) return;
-              const newScan = await retryScan.mutateAsync(id);
-              navigate(`/scans/${newScan.id}/progress`);
+            onClick={() => {
+              if (id) resumeScan.mutate(id);
             }}
-            disabled={retryScan.isPending}
+            disabled={resumeScan.isPending}
           >
             <RotateCcw className="h-4 w-4" />
-            {retryScan.isPending ? "Retrying..." : "Retry Scan"}
+            {resumeScan.isPending ? "Resuming..." : "Resume Scan"}
           </Button>
         </div>
       )}
-      {/* Failed with retry option */}
+      {/* Failed with resume option */}
       {rawStatus === "failed" && (
         <div className="flex justify-center">
           <Button
             variant="outline"
-            onClick={async () => {
-              if (!id) return;
-              const newScan = await retryScan.mutateAsync(id);
-              navigate(`/scans/${newScan.id}/progress`);
+            onClick={() => {
+              if (id) resumeScan.mutate(id);
             }}
-            disabled={retryScan.isPending}
+            disabled={resumeScan.isPending}
           >
             <RotateCcw className="h-4 w-4" />
-            {retryScan.isPending ? "Retrying..." : "Retry Scan"}
+            {resumeScan.isPending ? "Resuming..." : "Resume Scan"}
           </Button>
         </div>
       )}

@@ -13,7 +13,7 @@ import {
   RotateCcw,
   AlertTriangle,
 } from "lucide-react";
-import { useScan, useScanStats, useDeleteScan, useSaveFromScan, useRetryScan } from "@/api/scans";
+import { useScan, useScanStats, useDeleteScan, useSaveFromScan, useResumeScan } from "@/api/scans";
 import { useDuplicateDirs } from "@/api/results";
 import type { DuplicateDirectory } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,7 @@ export function ScanResults() {
   const navigate = useNavigate();
   const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
-  const retryScan = useRetryScan();
+  const resumeScan = useResumeScan();
   const [showDelete, setShowDelete] = useState(false);
 
   const actionQueue = useActionQueue();
@@ -96,15 +96,16 @@ export function ScanResults() {
         <div className="flex items-center gap-2">
           {(scan.status === "interrupted" || scan.status === "failed" || scan.status === "cancelled") && (
             <Button
-              onClick={async () => {
-                if (!id) return;
-                const newScan = await retryScan.mutateAsync(id);
-                navigate(`/scans/${newScan.id}/progress`);
+              onClick={() => {
+                if (id) {
+                  resumeScan.mutate(id);
+                  navigate(`/scans/${id}/progress`);
+                }
               }}
-              disabled={retryScan.isPending}
+              disabled={resumeScan.isPending}
             >
               <RotateCcw className="h-4 w-4" />
-              {retryScan.isPending ? "Retrying..." : "Retry Scan"}
+              {resumeScan.isPending ? "Resuming..." : "Resume Scan"}
             </Button>
           )}
           {scan.status === "completed" && !scan.saved_scan_id && (

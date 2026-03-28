@@ -28,20 +28,18 @@ async def _recover_orphaned_tasks():
     from app.models.action import Action
 
     async with async_session() as db:
-        # Recover orphaned scans
-        result = await db.execute(
-            update(Scan)
-            .where(Scan.status.in_(["running", "parsing", "analyzing"]))
-            .values(
-                status="interrupted",
-                error_message="Interrupted by restart",
-                completed_at=datetime.now(timezone.utc),
-            )
-            .returning(Scan.id)
-        )
-        orphaned_scans = result.all()
-        for (scan_id,) in orphaned_scans:
-            logger.warning("Recovered orphaned scan %d → interrupted", scan_id)
+        # Recover orphaned scans — preserve the phase they were in for resume
+        from sqlalchemy import select as sa_select
+        orphaned_q = sa_select(Scan).where(Scan.status.in_(["running", "parsing", "analyzing"]))
+        orphaned_result = await db.execute(orphaned_q)
+        orphaned_scans = orphaned_result.scalars().all()
+        for scan in orphaned_scans:
+            prev_phase = scan.status
+            scan.interrupted_phase = prev_phase
+            scan.status = "interrupted"
+            scan.error_message = f"Interrupted during {prev_phase} by restart"
+            scan.completed_at = datetime.now(timezone.utc)
+            logger.warning("Recovered orphaned scan %d (was %s) → interrupted", scan.id, prev_phase)
 
         # Recover orphaned actions
         result = await db.execute(

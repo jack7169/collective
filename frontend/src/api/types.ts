@@ -20,6 +20,7 @@ export interface Scan {
   created_at: string;
   progress_percent?: number | null;
   progress_message?: string | null;
+  interrupted_phase?: string | null;
 }
 
 export interface ScanStats {

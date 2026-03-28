@@ -26,3 +26,4 @@ class Scan(Base):
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     progress_percent = Column(Float, nullable=True)
     progress_message = Column(String, nullable=True)
+    interrupted_phase = Column(String, nullable=True)  # Phase when interrupted: "running", "parsing", "analyzing"
