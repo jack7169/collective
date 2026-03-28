@@ -27,6 +27,7 @@ export function NewScan() {
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [depth, setDepth] = useState(5);
+  const [threads, setThreads] = useState(0); // 0 = all cores
   const [customFlags, setCustomFlags] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,7 +43,10 @@ export function NewScan() {
         scan_depth: depth,
         // Low threshold to capture everything — user filters post-scan
         similarity_threshold: 10,
-        scanner_flags: customFlags.trim() ? { custom: customFlags.trim() } : undefined,
+        scanner_flags: {
+          ...(threads > 0 ? { threads: String(threads) } : {}),
+          ...(customFlags.trim() ? { custom: customFlags.trim() } : {}),
+        },
       });
       navigate(`/scans/${scan.id}/progress`);
     } catch {
@@ -107,7 +111,7 @@ export function NewScan() {
               <div className="text-left">
                 <CardTitle className="text-base">Advanced Options</CardTitle>
                 <CardDescription>
-                  Similarity depth and custom flags
+                  CPU threads, similarity depth, and custom flags
                 </CardDescription>
               </div>
               {showAdvanced ? (
@@ -119,6 +123,28 @@ export function NewScan() {
           </CardHeader>
           {showAdvanced && (
             <CardContent className="space-y-6">
+              {/* CPU Threads */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">CPU Threads</label>
+                  <span className="text-sm text-muted-foreground">
+                    {threads === 0 ? "All cores" : threads}
+                  </span>
+                </div>
+                <Slider
+                  value={[threads]}
+                  onValueChange={([v]) => setThreads(v ?? 0)}
+                  min={0}
+                  max={16}
+                  step={1}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Number of CPU threads for file hashing. 0 = use all available cores.
+                </p>
+              </div>
+
+              <Separator />
+
               {/* Scan depth */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">

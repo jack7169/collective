@@ -39,30 +39,6 @@ def _update_progress(session: Session, scan_id: int, **kwargs):
         session.commit()
 
 
-_interrupted_scan_id = None  # Track which scan is running for SIGTERM handler
-
-
-def _sigterm_handler(signum, frame):
-    """Gracefully mark the running scan as interrupted on shutdown."""
-    global _interrupted_scan_id
-    if _interrupted_scan_id is not None:
-        try:
-            session = _get_sync_session()
-            scan = session.get(Scan, _interrupted_scan_id)
-            if scan and scan.status in ("running", "parsing", "analyzing"):
-                scan.interrupted_phase = scan.status
-                scan.status = "interrupted"
-                scan.error_message = f"Interrupted during {scan.interrupted_phase} by shutdown"
-                scan.completed_at = datetime.now(timezone.utc)
-                session.commit()
-                logger.info("Scan %d gracefully interrupted during %s", _interrupted_scan_id, scan.interrupted_phase)
-            session.close()
-        except Exception:
-            logger.exception("Failed to mark scan as interrupted on shutdown")
-    # Re-raise so Huey's own handler runs
-    raise SystemExit(0)
-
-
 @huey.task()
 def run_scan_task(scan_id: int):
     """Execute full scan pipeline synchronously (runs in Huey worker).
@@ -70,13 +46,11 @@ def run_scan_task(scan_id: int):
     Supports phase-aware resume: if a scan was interrupted, it picks up
     from the phase it was in (running → re-scan with cache, parsing → re-parse,
     analyzing → re-analyze).
-    """
-    global _interrupted_scan_id
-    import signal
-    prev_handler = signal.signal(signal.SIGTERM, _sigterm_handler)
 
+    On container restart, startup recovery in main.py marks orphaned scans
+    as 'interrupted' with their phase preserved for resume.
+    """
     session = _get_sync_session()
-    _interrupted_scan_id = scan_id
     try:
         scan = session.get(Scan, scan_id)
         if not scan:
@@ -438,8 +412,6 @@ def run_scan_task(scan_id: int):
         except Exception:
             logger.exception("Failed to update scan status after error")
     finally:
-        _interrupted_scan_id = None
-        signal.signal(signal.SIGTERM, prev_handler)
         session.close()
 
 

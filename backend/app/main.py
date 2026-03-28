@@ -30,16 +30,30 @@ async def _recover_orphaned_tasks():
     async with async_session() as db:
         # Recover orphaned scans — preserve the phase they were in for resume
         from sqlalchemy import select as sa_select
-        orphaned_q = sa_select(Scan).where(Scan.status.in_(["running", "parsing", "analyzing"]))
+        orphaned_q = sa_select(Scan).where(
+            Scan.status.in_(["running", "parsing", "analyzing", "pending"])
+        )
         orphaned_result = await db.execute(orphaned_q)
         orphaned_scans = orphaned_result.scalars().all()
         for scan in orphaned_scans:
             prev_phase = scan.status
-            scan.interrupted_phase = prev_phase
-            scan.status = "interrupted"
-            scan.error_message = f"Interrupted during {prev_phase} by restart"
-            scan.completed_at = datetime.now(timezone.utc)
-            logger.warning("Recovered orphaned scan %d (was %s) → interrupted", scan.id, prev_phase)
+            if prev_phase == "pending":
+                # Pending scans that survived a restart were never picked up — re-enqueue them
+                try:
+                    from app.tasks.scan_tasks import run_scan_task
+                    run_scan_task(scan.id)
+                    logger.info("Re-enqueued pending scan %d", scan.id)
+                except Exception as e:
+                    scan.status = "failed"
+                    scan.error_message = f"Failed to re-enqueue after restart: {e}"
+                    scan.completed_at = datetime.now(timezone.utc)
+                    logger.error("Failed to re-enqueue scan %d: %s", scan.id, e)
+            else:
+                scan.interrupted_phase = prev_phase
+                scan.status = "interrupted"
+                scan.error_message = f"Interrupted during {prev_phase} by restart"
+                scan.completed_at = datetime.now(timezone.utc)
+                logger.warning("Recovered orphaned scan %d (was %s) → interrupted", scan.id, prev_phase)
 
         # Recover orphaned actions
         result = await db.execute(
