@@ -177,6 +177,10 @@ def run_scan_task(scan_id: int):
                         break
                     text = chunk.decode("utf-8", errors="replace")
                     buf += text
+                    # fclones uses \x1b[J (erase display) as line separator
+                    # instead of \n. Normalize these to \n before splitting.
+                    buf = _re.sub(r"\x1b\[J", "\n", buf)
+                    buf = _re.sub(r"\x1b\[\d+D", "\n", buf)  # cursor back N
                     while "\n" in buf or "\r" in buf:
                         idx = -1
                         for sep in ("\n", "\r"):
