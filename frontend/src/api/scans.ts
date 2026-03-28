@@ -60,6 +60,16 @@ export function useCancelScan() {
   });
 }
 
+export function useRetryScan() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => post<Scan>(`/scans/${id}/retry`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scans"] });
+    },
+  });
+}
+
 export function useScanStats(id: string | undefined) {
   return useQuery({
     queryKey: ["scans", id, "stats"],

@@ -126,60 +126,27 @@ export function NewScan() {
           </CardHeader>
           {showAdvanced && (
             <CardContent className="space-y-6">
-              {/* Scanner selection */}
+              {/* Scanner info */}
               <div className="space-y-3">
                 <label className="text-sm font-medium">Scanner Engine</label>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => setScanner("rmlint")}
-                    className={cn(
-                      "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
-                      scanner === "rmlint"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:bg-accent/50"
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-5 w-5 text-primary" />
-                      <span className="font-medium">rmlint</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Native directory-level detection with Merkle trees.
-                    </p>
-                    {scanners?.rmlint?.installed && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {scanners.rmlint.version}
-                      </span>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setScanner("fclones")}
-                    className={cn(
-                      "flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
-                      scanner === "fclones"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:bg-accent/50"
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Zap className="h-5 w-5 text-warning" />
-                      <span className="font-medium">fclones</span>
-                      <Badge variant="secondary" className="text-xs">
-                        Default
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Fastest file hasher. HDD-optimized I/O.
-                    </p>
-                    {scanners?.fclones?.installed && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {scanners.fclones.version}
-                      </span>
-                    )}
-                  </button>
+                <div className="rounded-lg border border-border p-4">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-warning" />
+                    <span className="font-medium">fclones</span>
+                    <Badge variant="secondary" className="text-xs">
+                      Multi-threaded
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Uses all CPU cores for fast file hashing with HDD-optimized I/O.
+                    Directory similarity is computed automatically after scanning.
+                    {scanners?.rmlint?.installed && " rmlint available as fallback."}
+                  </p>
+                  {scanners?.fclones?.installed && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {scanners.fclones.version}
+                    </span>
+                  )}
                 </div>
               </div>
 

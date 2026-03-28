@@ -43,6 +43,8 @@ class FclonesBackend(ScannerBackend):
         cmd.extend(all_paths)
         cmd.extend([
             "--cache",
+            "--threads", "0",       # Use all available CPU cores
+            "--min-size", "4096",   # Skip tiny files (<4KB)
             "-f", "json",
             "-o", output_path,
         ])

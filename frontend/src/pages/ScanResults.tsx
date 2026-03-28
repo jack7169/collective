@@ -38,6 +38,7 @@ const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" |
   cancelled: "warning",
   running: "secondary",
   pending: "secondary",
+  interrupted: "warning",
 };
 
 export function ScanResults() {

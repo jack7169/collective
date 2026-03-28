@@ -39,10 +39,38 @@ def _update_progress(session: Session, scan_id: int, **kwargs):
         session.commit()
 
 
+_interrupted_scan_id = None  # Track which scan is running for SIGTERM handler
+
+
+def _sigterm_handler(signum, frame):
+    """Gracefully mark the running scan as interrupted on shutdown."""
+    global _interrupted_scan_id
+    if _interrupted_scan_id is not None:
+        try:
+            session = _get_sync_session()
+            scan = session.get(Scan, _interrupted_scan_id)
+            if scan and scan.status in ("running", "parsing", "analyzing"):
+                scan.status = "interrupted"
+                scan.error_message = "Interrupted by shutdown"
+                scan.completed_at = datetime.now(timezone.utc)
+                session.commit()
+                logger.info("Scan %d gracefully interrupted on shutdown", _interrupted_scan_id)
+            session.close()
+        except Exception:
+            logger.exception("Failed to mark scan as interrupted on shutdown")
+    # Re-raise so Huey's own handler runs
+    raise SystemExit(0)
+
+
 @huey.task()
 def run_scan_task(scan_id: int):
     """Execute full scan pipeline synchronously (runs in Huey worker)."""
+    global _interrupted_scan_id
+    import signal
+    prev_handler = signal.signal(signal.SIGTERM, _sigterm_handler)
+
     session = _get_sync_session()
+    _interrupted_scan_id = scan_id
     try:
         scan = session.get(Scan, scan_id)
         if not scan:
@@ -60,8 +88,17 @@ def run_scan_task(scan_id: int):
         scan.progress_message = "Starting scan..."
         session.commit()
 
-        # Select scanner backend
-        if scan.scanner == "fclones":
+        # Select scanner backend with auto-fallback
+        import shutil
+        scanner = scan.scanner or "fclones"
+        if scanner == "fclones" and not shutil.which("fclones"):
+            logger.warning("fclones not found, falling back to rmlint for scan %d", scan_id)
+            scanner = "rmlint"
+        if scanner == "rmlint" and not shutil.which("rmlint"):
+            logger.warning("rmlint not found, falling back to fclones for scan %d", scan_id)
+            scanner = "fclones"
+
+        if scanner == "fclones":
             backend = FclonesBackend()
         else:
             backend = RmlintBackend()
@@ -212,8 +249,12 @@ def run_scan_task(scan_id: int):
                 else:
                     scan.progress_message = f"Scanner running... {time_str} elapsed"
 
-                session.commit()
+                # Commit progress every 5 seconds (not every 1s) to reduce SQLite write pressure
+                if poll_count % 5 == 0:
+                    session.commit()
 
+            # Final commit for any remaining progress
+            session.commit()
             reader_thread.join(timeout=5)
             try:
                 os.close(master_fd)
@@ -346,6 +387,8 @@ def run_scan_task(scan_id: int):
         except Exception:
             logger.exception("Failed to update scan status after error")
     finally:
+        _interrupted_scan_id = None
+        signal.signal(signal.SIGTERM, prev_handler)
         session.close()
 
 

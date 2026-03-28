@@ -19,12 +19,58 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _recover_orphaned_tasks():
+    """Mark tasks that were interrupted by a restart."""
+    from datetime import datetime, timezone
+    from sqlalchemy import update
+    from app.database import async_session
+    from app.models.scan import Scan
+    from app.models.action import Action
+
+    async with async_session() as db:
+        # Recover orphaned scans
+        result = await db.execute(
+            update(Scan)
+            .where(Scan.status.in_(["running", "parsing", "analyzing"]))
+            .values(
+                status="interrupted",
+                error_message="Interrupted by restart",
+                completed_at=datetime.now(timezone.utc),
+            )
+            .returning(Scan.id)
+        )
+        orphaned_scans = result.all()
+        for (scan_id,) in orphaned_scans:
+            logger.warning("Recovered orphaned scan %d → interrupted", scan_id)
+
+        # Recover orphaned actions
+        result = await db.execute(
+            update(Action)
+            .where(Action.status == "executing")
+            .values(
+                status="failed",
+                error_message="Interrupted by restart",
+            )
+            .returning(Action.id)
+        )
+        orphaned_actions = result.all()
+        for (action_id,) in orphaned_actions:
+            logger.warning("Recovered orphaned action %d → failed", action_id)
+
+        await db.commit()
+
+    total = len(orphaned_scans) + len(orphaned_actions)
+    if total:
+        logger.info("Recovered %d orphaned tasks on startup", total)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Collective backend...")
     os.makedirs(settings.CONFIG_DIR, exist_ok=True)
     await init_db()
     logger.info("Database initialized")
+    await _recover_orphaned_tasks()
     yield
     logger.info("Shutting down Collective backend...")
 

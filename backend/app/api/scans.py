@@ -79,6 +79,47 @@ async def cancel_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
     return ScanResponse.model_validate(scan)
 
 
+@router.post("/{scan_id}/retry", response_model=ScanResponse, status_code=201)
+async def retry_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
+    """Retry an interrupted, failed, or cancelled scan by creating a new scan with the same config."""
+    scan = await ScanService.get_scan(db, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.status not in ("interrupted", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only retry interrupted, failed, or cancelled scans (current: '{scan.status}')"
+        )
+
+    # Clone config into a new scan
+    from app.schemas.scan import ScanCreate
+    new_scan = await ScanService.create_scan(db, ScanCreate(
+        name=f"{scan.name} (retry)",
+        scanner=scan.scanner,
+        target_paths=scan.target_paths,
+        tagged_paths=scan.tagged_paths,
+        scanner_flags=scan.scanner_flags,
+        scan_depth=scan.scan_depth,
+        similarity_threshold=scan.similarity_threshold,
+    ))
+    if scan.saved_scan_id:
+        new_scan.saved_scan_id = scan.saved_scan_id
+        await db.commit()
+
+    try:
+        from app.tasks.scan_tasks import run_scan_task
+        run_scan_task(new_scan.id)
+        logger.info("Enqueued retry scan %d (from scan %d)", new_scan.id, scan_id)
+    except Exception as e:
+        logger.error("Failed to enqueue retry scan: %s", e)
+        await ScanService.update_scan_status(
+            db, new_scan.id, "failed", error_message=f"Failed to enqueue: {e}"
+        )
+        await db.commit()
+
+    return ScanResponse.model_validate(new_scan)
+
+
 @router.post("/{scan_id}/reanalyze", response_model=ScanResponse)
 async def reanalyze_scan(
     scan_id: int,

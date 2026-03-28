@@ -25,6 +25,7 @@ logging.basicConfig(
 )
 
 POLL_INTERVAL_SECONDS = 60
+STALE_SCAN_HOURS = 24  # Auto-recover scans stuck "running" for this long
 _running = True
 
 
@@ -109,6 +110,25 @@ def run_scheduler():
         try:
             session = _get_session()
             now = datetime.now(timezone.utc)
+
+            # Auto-recover stale scans (stuck "running" for >24h)
+            stale_cutoff = now - timedelta(hours=STALE_SCAN_HOURS)
+            stale_scans = session.execute(
+                select(Scan).where(
+                    Scan.status.in_(["running", "parsing", "analyzing"]),
+                    Scan.started_at < stale_cutoff,
+                )
+            ).scalars().all()
+            for stale in stale_scans:
+                logger.warning(
+                    "Auto-recovering stale scan %d (started %s, status=%s)",
+                    stale.id, stale.started_at, stale.status
+                )
+                stale.status = "interrupted"
+                stale.error_message = f"Auto-recovered: stuck in '{stale.status}' for >{STALE_SCAN_HOURS}h"
+                stale.completed_at = now
+            if stale_scans:
+                session.commit()
 
             # Check for due saved scans
             due_scans = session.execute(

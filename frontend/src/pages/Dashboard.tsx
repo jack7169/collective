@@ -25,6 +25,7 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "s
   completed: "success",
   failed: "destructive",
   cancelled: "outline",
+  interrupted: "warning",
 };
 
 const statusColors: Record<string, string> = {
@@ -33,6 +34,7 @@ const statusColors: Record<string, string> = {
   completed: "bg-green-500",
   failed: "bg-red-500",
   cancelled: "bg-yellow-500",
+  interrupted: "bg-amber-500",
 };
 
 export function Dashboard() {

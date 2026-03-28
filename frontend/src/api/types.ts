@@ -2,7 +2,7 @@ export interface Scan {
   id: number;
   saved_scan_id?: number | null;
   name: string;
-  status: "pending" | "running" | "parsing" | "analyzing" | "completed" | "failed" | "cancelled";
+  status: "pending" | "running" | "parsing" | "analyzing" | "completed" | "failed" | "cancelled" | "interrupted";
   scanner: "rmlint" | "fclones";
   target_paths: string[];
   tagged_paths?: string[] | null;
