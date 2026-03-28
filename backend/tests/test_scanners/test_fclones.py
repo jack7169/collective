@@ -45,12 +45,12 @@ class TestFclonesBuildCommand:
         cmd = backend.build_command(
             target_paths=["/data/share1"],
             tagged_paths=None,
-            extra_flags={"threads": "4", "min-size": "1K"},
+            extra_flags={"threads": "4", "min": "1K"},
             output_path="/tmp/output.json",
         )
         assert "--threads" in cmd
         assert "4" in cmd
-        assert "--min-size" in cmd
+        assert "--min" in cmd
 
 
 class TestFclonesParseOutput:
