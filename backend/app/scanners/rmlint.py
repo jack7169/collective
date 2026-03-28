@@ -121,18 +121,24 @@ class RmlintBackend(ScannerBackend):
         )
         if traversal_full:
             files = int(traversal_full.group(1))
-            dirs = int(traversal_full.group(3))  # "ignored folders" ≈ dir count
+            ignored_files = int(traversal_full.group(2))
+            ignored_folders = int(traversal_full.group(3))
+            ignored_total = ignored_files + ignored_folders
+            msg = f"Traversing: {files:,} files"
+            if ignored_total > 0:
+                msg += f" ({ignored_total:,} ignored)"
             return ScanProgressInfo(
-                message=f"Traversing: {files:,} files, {dirs:,} dirs",
+                percent=1.0,
+                message=msg,
                 total_files=files,
-                total_dirs=dirs,
+                # total_dirs intentionally omitted — rmlint doesn't report it during traversal
             )
 
         # Simpler traversal (just file count)
         traversal_simple = re.search(r"Traversing\s*\((\d+)\s+usable files", line)
         if traversal_simple:
             files = int(traversal_simple.group(1))
-            return ScanProgressInfo(message=f"Traversing: {files:,} files", total_files=files)
+            return ScanProgressInfo(percent=1.0, message=f"Traversing: {files:,} files", total_files=files)
 
         # Traversing a path
         traversal_path = re.search(r"Traversing\s+'?([^'(]+)'?", line)

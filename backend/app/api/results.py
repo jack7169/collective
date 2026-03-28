@@ -126,6 +126,109 @@ async def list_similar_dirs(
     )
 
 
+@router.get("/duplicate-groups")
+async def list_duplicate_groups(
+    scan_id: int,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("size"),
+    sort_order: str = Query("desc"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return duplicate files grouped by checksum, paginated at group level."""
+    await _get_scan_or_404(db, scan_id)
+
+    from pydantic import BaseModel as BM, ConfigDict
+
+    class FileInGroup(BM):
+        model_config = ConfigDict(from_attributes=True)
+        id: int
+        path: str
+        size: int
+        mtime: Optional[float] = None
+        is_original: bool
+
+    class DuplicateGroupResponse(BM):
+        checksum: str
+        group_id: Optional[str] = None
+        file_count: int
+        total_size: int
+        files: list[FileInGroup]
+
+    # Count distinct groups with >1 file
+    count_q = (
+        select(func.count())
+        .select_from(
+            select(DuplicateFile.checksum)
+            .where(DuplicateFile.scan_id == scan_id)
+            .group_by(DuplicateFile.checksum)
+            .having(func.count() > 1)
+            .subquery()
+        )
+    )
+    total = (await db.execute(count_q)).scalar() or 0
+
+    # Get page of group checksums
+    sort_col_map = {
+        "size": func.sum(DuplicateFile.size),
+        "file_count": func.count(),
+    }
+    sort_expr = sort_col_map.get(sort_by, func.sum(DuplicateFile.size))
+    order = desc(sort_expr) if sort_order == "desc" else sort_expr.asc()
+
+    groups_q = (
+        select(
+            DuplicateFile.checksum,
+            func.count().label("file_count"),
+            func.sum(DuplicateFile.size).label("total_size"),
+            func.min(DuplicateFile.group_id).label("group_id"),
+        )
+        .where(DuplicateFile.scan_id == scan_id)
+        .group_by(DuplicateFile.checksum)
+        .having(func.count() > 1)
+        .order_by(order)
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
+    groups_result = await db.execute(groups_q)
+    groups = list(groups_result)
+
+    if not groups:
+        return PaginatedResponse.create(items=[], total=total, page=page, per_page=per_page)
+
+    # Fetch all files for those checksums in one query
+    checksums = [g.checksum for g in groups]
+    files_q = (
+        select(DuplicateFile)
+        .where(
+            DuplicateFile.scan_id == scan_id,
+            DuplicateFile.checksum.in_(checksums),
+        )
+        .order_by(desc(DuplicateFile.is_original), DuplicateFile.mtime.asc())
+    )
+    files_result = await db.execute(files_q)
+    all_files = files_result.scalars().all()
+
+    # Group files by checksum
+    files_by_checksum: dict[str, list] = {}
+    for f in all_files:
+        files_by_checksum.setdefault(f.checksum, []).append(f)
+
+    # Build response maintaining group order
+    items = []
+    for g in groups:
+        group_files = files_by_checksum.get(g.checksum, [])
+        items.append(DuplicateGroupResponse(
+            checksum=g.checksum,
+            group_id=g.group_id,
+            file_count=g.file_count,
+            total_size=g.total_size,
+            files=[FileInGroup.model_validate(f) for f in group_files],
+        ))
+
+    return PaginatedResponse.create(items=items, total=total, page=page, per_page=per_page)
+
+
 @router.get("/duplicate-files")
 async def list_duplicate_files(
     scan_id: int,

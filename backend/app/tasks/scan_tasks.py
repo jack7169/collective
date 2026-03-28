@@ -176,11 +176,11 @@ def run_scan_task(scan_id: int):
                     if progress:
                         if progress.percent is not None:
                             scan.progress_percent = progress.percent
-                        if progress.total_files:
+                        if progress.total_files is not None:
                             scan.total_files = progress.total_files
-                        if progress.total_dirs:
+                        if progress.total_dirs is not None:
                             scan.total_dirs = progress.total_dirs
-                        if progress.total_size:
+                        if progress.total_size is not None:
                             scan.total_size = progress.total_size
                         if progress.message:
                             last_parsed_msg = progress.message

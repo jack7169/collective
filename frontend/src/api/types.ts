@@ -213,6 +213,23 @@ export interface FileOpResult {
   message?: string;
 }
 
+// Grouped duplicate files for Czkawka-style view
+export interface DuplicateFileInGroup {
+  id: number;
+  path: string;
+  size: number;
+  mtime: number | null;
+  is_original: boolean;
+}
+
+export interface DuplicateGroup {
+  checksum: string;
+  group_id: string | null;
+  file_count: number;
+  total_size: number;
+  files: DuplicateFileInGroup[];
+}
+
 // Scheduler types (legacy — kept for compat)
 export interface ScanSchedule {
   id: number;

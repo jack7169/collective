@@ -82,8 +82,10 @@ export function SimilarDirectories() {
 
   // Initialize tagged paths from server (once)
   const currentTags = tagData?.tagged_paths ?? [];
-  if (currentTags.length > 0 && taggedPaths.length === 0) {
+  const [tagsInitialized, setTagsInitialized] = useState(false);
+  if (currentTags.length > 0 && !tagsInitialized) {
     setTaggedPaths(currentTags);
+    setTagsInitialized(true);
   }
 
   const filters: DirectorySimilarityFilters = {

@@ -7,7 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Try to install fclones (non-fatal if fails)
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
-      curl -L "https://github.com/pkolaczk/fclones/releases/download/v0.34.0/fclones-0.34.0-linux-gnu-x86_64.tar.gz" | tar xz -C /usr/local/bin/ || true; \
+      curl -fsSL "https://github.com/pkolaczk/fclones/releases/download/v0.35.0/fclones-0.35.0-linux-glibc-x86_64.tar.gz" -o /tmp/fclones.tar.gz && \
+      tar xzf /tmp/fclones.tar.gz -C / && rm /tmp/fclones.tar.gz || true; \
+    elif [ "$ARCH" = "arm64" ]; then \
+      curl -fsSL "https://github.com/pkolaczk/fclones/releases/download/v0.35.0/fclones-0.35.0-linux-glibc-aarch64.tar.gz" -o /tmp/fclones.tar.gz && \
+      tar xzf /tmp/fclones.tar.gz -C / && rm /tmp/fclones.tar.gz || true; \
     fi
 
 WORKDIR /app

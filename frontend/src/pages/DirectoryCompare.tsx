@@ -451,11 +451,37 @@ export function DirectoryCompare() {
           <Play className="h-4 w-4" />
           {dryRun.isPending ? "Running..." : "Dry Run (rsync)"}
         </Button>
-        <Button variant="outline">
+        <Button
+          variant="outline"
+          onClick={async () => {
+            if (!id || !dirA) return;
+            await createAction.mutateAsync({
+              scan_id: Number(id),
+              action_type: "bookmark",
+              source_path: dirA,
+              dest_path: dirB ?? undefined,
+              notes: "Bookmarked from compare view",
+            });
+          }}
+          disabled={createAction.isPending}
+        >
           <Bookmark className="h-4 w-4" />
           Bookmark
         </Button>
-        <Button variant="ghost">
+        <Button
+          variant="ghost"
+          onClick={async () => {
+            if (!id || !dirA) return;
+            await createAction.mutateAsync({
+              scan_id: Number(id),
+              action_type: "skip",
+              source_path: dirA,
+              dest_path: dirB ?? undefined,
+              notes: "Skipped from compare view",
+            });
+          }}
+          disabled={createAction.isPending}
+        >
           <SkipForward className="h-4 w-4" />
           Skip
         </Button>

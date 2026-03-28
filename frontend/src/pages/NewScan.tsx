@@ -49,6 +49,7 @@ export function NewScan() {
         scan_depth: depth,
         // Low threshold to capture everything — user filters post-scan
         similarity_threshold: 10,
+        scanner_flags: customFlags.trim() ? { custom: customFlags.trim() } : undefined,
       });
       navigate(`/scans/${scan.id}/progress`);
     } catch {
@@ -142,9 +143,6 @@ export function NewScan() {
                     <div className="flex items-center gap-2">
                       <Shield className="h-5 w-5 text-primary" />
                       <span className="font-medium">rmlint</span>
-                      <Badge variant="secondary" className="text-xs">
-                        Default
-                      </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Native directory-level detection with Merkle trees.
@@ -169,6 +167,9 @@ export function NewScan() {
                     <div className="flex items-center gap-2">
                       <Zap className="h-5 w-5 text-warning" />
                       <span className="font-medium">fclones</span>
+                      <Badge variant="secondary" className="text-xs">
+                        Default
+                      </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Fastest file hasher. HDD-optimized I/O.

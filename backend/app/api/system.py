@@ -1,9 +1,11 @@
 import asyncio
+import json
 import logging
 import os
 import shutil
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from app.config import get_settings
 
@@ -78,6 +80,65 @@ async def list_mounts():
         return {"data_dir": data_dir, "mounts": [], "error": "Permission denied"}
 
     return {"data_dir": data_dir, "mounts": mounts}
+
+
+# --- User-facing settings (persisted to JSON file) ---
+
+_SETTINGS_FILE = None
+
+
+def _get_settings_path() -> str:
+    global _SETTINGS_FILE
+    if _SETTINGS_FILE is None:
+        settings = get_settings()
+        _SETTINGS_FILE = os.path.join(settings.CONFIG_DIR, "user_settings.json")
+    return _SETTINGS_FILE
+
+
+_DEFAULTS = {
+    "default_scanner": "fclones",
+    "similarity_threshold": 50,
+    "scan_depth": 5,
+    "read_only": False,
+}
+
+
+def _load_settings() -> dict:
+    path = _get_settings_path()
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                saved = json.load(f)
+            return {**_DEFAULTS, **saved}
+        except (json.JSONDecodeError, OSError):
+            pass
+    return dict(_DEFAULTS)
+
+
+def _save_settings(data: dict):
+    path = _get_settings_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+class UserSettings(BaseModel):
+    default_scanner: str = "fclones"
+    similarity_threshold: int = 50
+    scan_depth: int = 5
+    read_only: bool = False
+
+
+@router.get("/settings")
+async def get_user_settings():
+    return _load_settings()
+
+
+@router.put("/settings")
+async def update_user_settings(body: UserSettings):
+    data = body.model_dump()
+    _save_settings(data)
+    return data
 
 
 @router.get("/btrfs")

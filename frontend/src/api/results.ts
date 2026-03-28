@@ -2,6 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { get, post } from "./client";
 import type {
   DuplicateDirectory,
+  DuplicateGroup,
   DirectorySimilarity,
   DirectorySimilarityFilters,
   DuplicateFile,
@@ -43,6 +44,22 @@ export function useSimilarDirs(
     queryFn: () =>
       get<PaginatedResponse<DirectorySimilarity>>(
         `/scans/${scanId}/similar-dirs${qs ? `?${qs}` : ""}`
+      ),
+    enabled: !!scanId,
+  });
+}
+
+export function useDuplicateGroups(
+  scanId: string | undefined,
+  page = 1,
+  perPage = 20,
+  sortBy = "size"
+) {
+  return useQuery({
+    queryKey: ["scans", scanId, "duplicate-groups", page, perPage, sortBy],
+    queryFn: () =>
+      get<PaginatedResponse<DuplicateGroup>>(
+        `/scans/${scanId}/duplicate-groups?page=${page}&per_page=${perPage}&sort_by=${sortBy}`
       ),
     enabled: !!scanId,
   });

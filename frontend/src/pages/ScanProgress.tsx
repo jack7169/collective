@@ -69,32 +69,43 @@ export function ScanProgress() {
   const phaseInfo = phaseConfig[phase] ?? phaseConfig["hashing"]!;
   const PhaseIcon = phaseInfo.icon;
   const percent = progress?.progress_percent ?? scan?.progress_percent ?? 0;
+  const isActive = ["running", "parsing", "analyzing", "pending"].includes(rawStatus);
+
+  // Show "--" for metrics that aren't available yet during active scans
+  function metricValue(
+    val: number | null | undefined,
+    formatter: (n: number) => string
+  ): string {
+    if (val != null) return formatter(val);
+    if (isActive) return "--";
+    return formatter(0);
+  }
 
   const metricCards = [
     {
       label: "Files",
-      value: formatNumber(progress?.total_files ?? scan?.total_files ?? 0),
+      value: metricValue(progress?.total_files ?? scan?.total_files, formatNumber),
       icon: Files,
       borderColor: "border-l-blue-500",
       iconColor: "text-blue-500",
     },
     {
       label: "Directories",
-      value: formatNumber(progress?.total_dirs ?? scan?.total_dirs ?? 0),
+      value: metricValue(progress?.total_dirs ?? scan?.total_dirs, formatNumber),
       icon: FolderOpen,
       borderColor: "border-l-green-500",
       iconColor: "text-green-500",
     },
     {
       label: "Total Size",
-      value: formatBytes(progress?.total_size ?? scan?.total_size ?? 0),
+      value: metricValue(progress?.total_size ?? scan?.total_size, formatBytes),
       icon: HardDrive,
       borderColor: "border-l-amber-500",
       iconColor: "text-amber-500",
     },
     {
       label: "Duplicates",
-      value: formatNumber(progress?.duplicates_found ?? scan?.duplicates_found ?? 0),
+      value: metricValue(progress?.duplicates_found ?? scan?.duplicates_found, formatNumber),
       icon: Layers,
       borderColor: "border-l-cyan-500",
       iconColor: "text-cyan-500",
@@ -142,7 +153,13 @@ export function ScanProgress() {
               value={percent}
               className={cn(
                 "h-2",
-                percent > 80 ? "[&>div]:bg-red-500" : percent > 60 ? "[&>div]:bg-amber-500" : "[&>div]:bg-green-500"
+                percent < 2 && isActive
+                  ? "[&>div]:animate-pulse [&>div]:w-full [&>div]:bg-primary/40"
+                  : percent > 80
+                    ? "[&>div]:bg-red-500"
+                    : percent > 60
+                      ? "[&>div]:bg-amber-500"
+                      : "[&>div]:bg-green-500"
               )}
             />
           </div>

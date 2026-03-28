@@ -9,9 +9,10 @@ import {
   Trash2,
   BookmarkPlus,
   BookmarkCheck,
+  Layers,
 } from "lucide-react";
 import { useScan, useScanStats, useDeleteScan, useSaveFromScan } from "@/api/scans";
-import { useDuplicateDirs, useDuplicateFiles } from "@/api/results";
+import { useDuplicateDirs } from "@/api/results";
 import type { DuplicateDirectory } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,16 +24,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { StatsCards } from "@/components/results/StatsCards";
-import { formatBytes, formatDate, formatNumber } from "@/lib/format";
+import { SpaceChart } from "@/components/results/SpaceChart";
+import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
+import { ActionQueuePanel } from "@/components/common/ActionQueuePanel";
+import { useActionQueue } from "@/hooks/useActionQueue";
+import { formatBytes, formatDate } from "@/lib/format";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
@@ -49,11 +46,11 @@ export function ScanResults() {
   const scanExists = !!scan;
   const { data: stats } = useScanStats(scanExists ? id : undefined);
   const { data: dupDirsData } = useDuplicateDirs(scanExists ? id : undefined);
-  const [filesPage, setFilesPage] = useState(1);
-  const { data: dupFilesData } = useDuplicateFiles(scanExists ? id : undefined, filesPage);
   const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
   const [showDelete, setShowDelete] = useState(false);
+
+  const actionQueue = useActionQueue();
 
   if (scanLoading) {
     return (
@@ -128,15 +125,25 @@ export function ScanResults() {
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="groups">
+            <Layers className="h-4 w-4 mr-1" />
+            Duplicate Groups
+          </TabsTrigger>
           <TabsTrigger value="duplicates">Exact Duplicates</TabsTrigger>
           <TabsTrigger value="similar">Similar Directories</TabsTrigger>
-          <TabsTrigger value="files">Files</TabsTrigger>
         </TabsList>
 
         {/* Overview */}
         <TabsContent value="overview">
           <div className="space-y-6">
             {stats && <StatsCards stats={stats} />}
+
+            {stats && (
+              <SpaceChart
+                totalSize={stats.scan_total_size ?? 0}
+                recoverable={stats.space_recoverable}
+              />
+            )}
 
             {/* Scan details */}
             <Card>
@@ -184,6 +191,16 @@ export function ScanResults() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Duplicate Groups (Czkawka-style) */}
+        <TabsContent value="groups">
+          {id && (
+            <DuplicateGroupsList
+              scanId={id}
+              addAction={actionQueue.addAction}
+            />
+          )}
         </TabsContent>
 
         {/* Exact Duplicates */}
@@ -267,92 +284,19 @@ export function ScanResults() {
             </CardContent>
           </Card>
         </TabsContent>
-
-        {/* Files */}
-        <TabsContent value="files">
-          {dupFilesData?.items && dupFilesData.items.length > 0 ? (
-            <Card>
-              <CardContent className="pt-6">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead>Path</TableHead>
-                      <TableHead className="w-24">Size</TableHead>
-                      <TableHead className="w-32">Modified</TableHead>
-                      <TableHead className="w-20">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dupFilesData.items.map((file, i) => (
-                      <TableRow key={`${file.path}-${i}`} className="hover:bg-accent/50">
-                        <TableCell className="font-mono text-xs truncate max-w-md">
-                          {file.path}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {formatBytes(file.size)}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {file.mtime
-                            ? formatDate(new Date(file.mtime * 1000).toISOString())
-                            : "—"}
-                        </TableCell>
-                        <TableCell>
-                          {file.is_original ? (
-                            <Badge variant="success" className="text-xs">
-                              original
-                            </Badge>
-                          ) : (
-                            <Badge variant="destructive" className="text-xs">
-                              duplicate
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-
-                {/* Pagination */}
-                {dupFilesData.pages > 1 && (
-                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
-                    <span className="text-sm text-muted-foreground">
-                      Page {dupFilesData.page} of {dupFilesData.pages} (
-                      {formatNumber(dupFilesData.total)} files)
-                    </span>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={filesPage <= 1}
-                        onClick={() => setFilesPage((p) => p - 1)}
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={filesPage >= dupFilesData.pages}
-                        onClick={() => setFilesPage((p) => p + 1)}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Files className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground">
-                  No duplicate files found
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
       </Tabs>
+
+      {/* Action Queue Panel */}
+      <ActionQueuePanel
+        queue={actionQueue.queue}
+        onRemove={actionQueue.removeAction}
+        onReorder={actionQueue.reorderAction}
+        onClear={actionQueue.clearQueue}
+        onExecute={actionQueue.executeQueue}
+        isExecuting={actionQueue.isExecuting}
+        lastResult={actionQueue.lastResult}
+        totalEstimatedSize={actionQueue.totalEstimatedSize}
+      />
 
       <ConfirmDialog
         open={showDelete}
