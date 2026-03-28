@@ -3,12 +3,9 @@ import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronUp,
-  Zap,
-  Shield,
   Play,
 } from "lucide-react";
 import { useCreateScan } from "@/api/scans";
-import { useScanners } from "@/hooks/useBrowse";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,21 +15,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { PathPicker } from "@/components/scan/PathPicker";
-import { cn } from "@/lib/utils";
 
 export function NewScan() {
   const navigate = useNavigate();
   const createScan = useCreateScan();
-  const { data: scanners } = useScanners();
 
   const [name, setName] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [scanner, setScanner] = useState<"rmlint" | "fclones">("fclones");
   const [depth, setDepth] = useState(5);
   const [customFlags, setCustomFlags] = useState("");
 
@@ -44,7 +37,7 @@ export function NewScan() {
     try {
       const scan = await createScan.mutateAsync({
         name: name.trim(),
-        scanner,
+        scanner: "fclones",
         target_paths: selectedPaths,
         scan_depth: depth,
         // Low threshold to capture everything — user filters post-scan
@@ -62,8 +55,8 @@ export function NewScan() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">New Scan</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Select directories to scan for duplicates. You can tag originals and
-          fine-tune similarity after the scan completes.
+          Select directories to scan for duplicate files and similar directories.
+          Uses multi-threaded hashing with automatic directory similarity analysis.
         </p>
       </div>
 
@@ -114,7 +107,7 @@ export function NewScan() {
               <div className="text-left">
                 <CardTitle className="text-base">Advanced Options</CardTitle>
                 <CardDescription>
-                  Scanner engine, depth, and custom flags
+                  Similarity depth and custom flags
                 </CardDescription>
               </div>
               {showAdvanced ? (
@@ -126,36 +119,10 @@ export function NewScan() {
           </CardHeader>
           {showAdvanced && (
             <CardContent className="space-y-6">
-              {/* Scanner info */}
-              <div className="space-y-3">
-                <label className="text-sm font-medium">Scanner Engine</label>
-                <div className="rounded-lg border border-border p-4">
-                  <div className="flex items-center gap-2">
-                    <Zap className="h-5 w-5 text-warning" />
-                    <span className="font-medium">fclones</span>
-                    <Badge variant="secondary" className="text-xs">
-                      Multi-threaded
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Uses all CPU cores for fast file hashing with HDD-optimized I/O.
-                    Directory similarity is computed automatically after scanning.
-                    {scanners?.rmlint?.installed && " rmlint available as fallback."}
-                  </p>
-                  {scanners?.fclones?.installed && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {scanners.fclones.version}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <Separator />
-
               {/* Scan depth */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">Scan Depth</label>
+                  <label className="text-sm font-medium">Similarity Depth</label>
                   <span className="text-sm text-muted-foreground">
                     {depth}
                   </span>
@@ -169,7 +136,7 @@ export function NewScan() {
                 />
                 <p className="text-xs text-muted-foreground">
                   Directory depth for similarity grouping. Higher = more
-                  granular.
+                  granular comparison of nested folders.
                 </p>
               </div>
 
@@ -177,13 +144,16 @@ export function NewScan() {
 
               {/* Custom flags */}
               <div className="space-y-3">
-                <label className="text-sm font-medium">Custom Flags</label>
+                <label className="text-sm font-medium">Custom Scanner Flags</label>
                 <textarea
                   value={customFlags}
                   onChange={(e) => setCustomFlags(e.target.value)}
-                  placeholder="Additional command-line flags for the scanner..."
+                  placeholder="e.g., --min-size 1M --max-size 10G"
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Additional flags passed to the scanner. See fclones documentation for options.
+                </p>
               </div>
             </CardContent>
           )}

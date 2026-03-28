@@ -5,13 +5,6 @@ import { get, put } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Card,
   CardContent,
   CardDescription,
@@ -34,7 +27,6 @@ export function Settings() {
     queryFn: () => get<UserSettings>("/system/settings"),
   });
 
-  const [scanner, setScanner] = useState("fclones");
   const [threshold, setThreshold] = useState(50);
   const [depth, setDepth] = useState(5);
   const [readOnly, setReadOnly] = useState(false);
@@ -42,7 +34,6 @@ export function Settings() {
   // Sync local state when settings load
   useEffect(() => {
     if (settings) {
-      setScanner(settings.default_scanner);
       setThreshold(settings.similarity_threshold);
       setDepth(settings.scan_depth);
       setReadOnly(settings.read_only);
@@ -58,7 +49,7 @@ export function Settings() {
 
   const handleSave = () => {
     saveMutation.mutate({
-      default_scanner: scanner,
+      default_scanner: "fclones",
       similarity_threshold: threshold,
       scan_depth: depth,
       read_only: readOnly,
@@ -82,27 +73,6 @@ export function Settings() {
           Configure default scan parameters and application behavior
         </p>
       </div>
-
-      {/* Default Scanner */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Default Scanner</CardTitle>
-          <CardDescription>
-            Scanner engine used for new scans by default
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select value={scanner} onValueChange={setScanner}>
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="fclones">fclones (Default)</SelectItem>
-              <SelectItem value="rmlint">rmlint</SelectItem>
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
 
       {/* Similarity Threshold */}
       <Card>
