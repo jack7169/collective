@@ -115,12 +115,15 @@ async def resume_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
         logger.info("Enqueued resume for scan %d (phase: %s)", scan_id, scan.interrupted_phase)
     except Exception as e:
         logger.error("Failed to enqueue resume: %s", e)
-        scan.status = "failed"
-        scan.error_message = f"Failed to enqueue resume: {e}"
-        await db.commit()
+        scan = await ScanService.get_scan(db, scan_id)
+        if scan:
+            scan.status = "failed"
+            scan.error_message = f"Failed to enqueue resume: {e}"
+            await db.commit()
+        raise HTTPException(status_code=500, detail=str(e))
 
-    await db.commit()
-    scan = await ScanService.get_scan(db, scan_id)
+    # Re-fetch to get latest state (task may have already started)
+    await db.refresh(scan)
     return ScanResponse.model_validate(scan)
 
 
@@ -189,7 +192,7 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     elapsed_seconds=elapsed,
                     started_at=scan.started_at,
                 )
-                await websocket.send_json(progress.model_dump())
+                await websocket.send_json(progress.model_dump(mode="json"))
 
                 if scan.status in ("completed", "failed", "cancelled", "interrupted"):
                     break
