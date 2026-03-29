@@ -42,14 +42,9 @@ class FclonesBackend(ScannerBackend):
         if tagged_paths:
             all_paths.extend(tagged_paths)
 
-        # Use a per-scan cache directory to avoid lock contention
-        cache_dir = output_path.rsplit(".", 1)[0] + "_fclones_cache"
-        os.makedirs(cache_dir, exist_ok=True)
-
         cmd.extend(all_paths)
         cmd.extend([
             "--cache",
-            "--cache-dir", cache_dir,
             "--min", "4096",        # Skip tiny files (<4KB)
             "-f", "json",
             "-o", output_path,

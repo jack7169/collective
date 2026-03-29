@@ -23,7 +23,9 @@ export function useScan(id: string | undefined) {
     enabled: !!id,
     refetchInterval: (query) => {
       const scan = query.state.data;
-      if (scan?.status === "running") return 5_000;
+      if (!scan) return 5_000; // Not loaded yet, keep polling
+      const active = ["pending", "running", "parsing", "analyzing", "interrupted"];
+      if (active.includes(scan.status)) return 5_000;
       return false;
     },
   });

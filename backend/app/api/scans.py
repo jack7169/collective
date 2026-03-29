@@ -191,7 +191,7 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                 )
                 await websocket.send_json(progress.model_dump())
 
-                if scan.status in ("completed", "failed", "cancelled"):
+                if scan.status in ("completed", "failed", "cancelled", "interrupted"):
                     break
 
             await asyncio.sleep(0.5)
