@@ -191,8 +191,8 @@ export function ScanProgress() {
               )}
             />
 
-            {/* Elapsed time + ETA bar */}
-            {(elapsed != null || eta) && (
+            {/* Elapsed time + ETA bar — always visible during active scan */}
+            {isActive && (
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <div className="flex items-center gap-1.5">
                   <Clock className="h-3 w-3" />
@@ -200,13 +200,15 @@ export function ScanProgress() {
                     Elapsed: {elapsed != null ? formatElapsed(elapsed) : "--"}
                   </span>
                 </div>
-                {eta && (
+                {eta ? (
                   <div className="flex items-center gap-1.5">
                     <Timer className="h-3 w-3" />
                     <span className="tabular-nums">
                       Remaining: {eta}
                     </span>
                   </div>
+                ) : (
+                  <span className="text-muted-foreground/50">Estimating...</span>
                 )}
               </div>
             )}
