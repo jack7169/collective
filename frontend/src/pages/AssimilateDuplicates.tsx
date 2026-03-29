@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Layers,
   AlertTriangle,
+  Box,
 } from "lucide-react";
 import {
   Panel,
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CommitPreview } from "@/components/assimilate/CommitPreview";
+import { DirectoryPointCloud } from "@/components/assimilate/DirectoryPointCloud";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -129,6 +131,7 @@ export function AssimilateDuplicates() {
   const [sessionId, setSessionId] = useState<number | undefined>();
   const [showPreview, setShowPreview] = useState(false);
   const [localOps, setLocalOps] = useState<StagedOperation[]>([]);
+  const [show3D, setShow3D] = useState(false);
 
   const createSession = useCreateAssimilateSession();
   const { data: session } = useAssimilateSession(sessionId);
@@ -268,6 +271,9 @@ export function AssimilateDuplicates() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShow3D(true)}>
+            <Box className="h-3.5 w-3.5" /> 3D View
+          </Button>
           <Button variant="outline" size="sm" onClick={clearOps} disabled={localOps.length === 0}>
             <RotateCcw className="h-3.5 w-3.5" /> Reset
           </Button>
@@ -468,6 +474,34 @@ export function AssimilateDuplicates() {
           </PanelGroup>
         </Panel>
       </PanelGroup>
+
+      {/* Fullscreen 3D point cloud */}
+      {show3D && (
+        <div className="fixed inset-0 z-50 bg-background">
+          <div className="absolute top-4 right-4 z-10 flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShow3D(false)}>
+              Close 3D View
+            </Button>
+          </div>
+          <div className="absolute top-4 left-4 z-10">
+            <h2 className="text-lg font-bold text-white">Directory Point Cloud</h2>
+            <p className="text-xs text-white/50">
+              Orbit: drag · Zoom: scroll · Click: inspect
+            </p>
+          </div>
+          {treeDiff?.tree && dirA && dirB ? (
+            <DirectoryPointCloud
+              treeData={treeDiff.tree}
+              dirA={dirA}
+              dirB={dirB}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              Loading...
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Commit preview dialog */}
       <CommitPreview

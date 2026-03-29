@@ -144,12 +144,19 @@ def run_scan_task(scan_id: int):
             winsize = struct.pack("HHHH", 24, 80, 0, 0)
             fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
+            # Use a per-scan cache dir so fclones doesn't contend
+            # on the shared hash database lock
+            scan_cache_dir = output_path.rsplit(".", 1)[0] + "_cache"
+            os.makedirs(scan_cache_dir, exist_ok=True)
+            scan_env = {**os.environ, "XDG_CACHE_HOME": scan_cache_dir}
+
             proc = subprocess.Popen(
                 cmd,
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
                 close_fds=True,
+                env=scan_env,
             )
             os.close(slave_fd)
 
@@ -396,11 +403,15 @@ def run_scan_task(scan_id: int):
         scan.completed_at = datetime.now(timezone.utc)
         session.commit()
 
-        # Clean up output file
+        # Clean up output file and fclones cache dir
         try:
             os.remove(output_path)
         except OSError:
             pass
+        cache_dir = output_path.rsplit(".", 1)[0] + "_cache"
+        if os.path.isdir(cache_dir):
+            import shutil
+            shutil.rmtree(cache_dir, ignore_errors=True)
 
         logger.info("Scan %d completed successfully", scan_id)
 
