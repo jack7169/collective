@@ -1,5 +1,7 @@
 import json
 import logging
+import multiprocessing
+import os
 import re
 from typing import Iterator, Optional
 
@@ -54,8 +56,6 @@ class FclonesBackend(ScannerBackend):
         ])
 
         # Set thread pool to use all cores (fclones default is conservative)
-        # Format: main pool size, sequential pool size
-        import multiprocessing
         ncpu = multiprocessing.cpu_count()
         cmd.extend(["--threads", f"default:{ncpu},{ncpu}"])
 
