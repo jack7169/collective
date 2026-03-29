@@ -36,7 +36,7 @@ async def get_db():
 
 
 async def init_db():
-    from app.models import action, duplicate, scan, settings as settings_model, similarity  # noqa: F811
+    from app.models import action, assimilate, duplicate, scan, settings as settings_model, similarity  # noqa: F811
 
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):

@@ -566,11 +566,49 @@ def _compute_similarities_sync(
             relationship=relationship,
         ))
 
-    # Bulk insert
+    # Bulk insert similarities
     batch_size = 1000
     for i in range(0, len(records), batch_size):
         session.add_all(records[i:i + batch_size])
         session.flush()
     session.commit()
+
+    # Populate DuplicateDirectory from >99% byte-similar pairs
+    # This fills the "Exact Duplicates" tab
+    dir_dup_records = []
+    group_counter = 0
+    for rec in records:
+        max_size = max(rec.size_a, rec.size_b, 1)
+        byte_similarity = rec.shared_size / max_size
+        if byte_similarity >= 0.99:
+            group_counter += 1
+            gid = f"sim_{group_counter}"
+            dir_dup_records.append(DuplicateDirectory(
+                scan_id=scan_id,
+                group_id=gid,
+                path=rec.dir_a,
+                file_count=rec.files_a,
+                total_size=rec.size_a,
+                is_original=True,
+            ))
+            dir_dup_records.append(DuplicateDirectory(
+                scan_id=scan_id,
+                group_id=gid,
+                path=rec.dir_b,
+                file_count=rec.files_b,
+                total_size=rec.size_b,
+                is_original=False,
+            ))
+
+    if dir_dup_records:
+        # Clear old dir duplicates first
+        session.execute(
+            delete(DuplicateDirectory).where(DuplicateDirectory.scan_id == scan_id)
+        )
+        for i in range(0, len(dir_dup_records), batch_size):
+            session.add_all(dir_dup_records[i:i + batch_size])
+            session.flush()
+        session.commit()
+        logger.info("Populated %d exact duplicate directories for scan %d", len(dir_dup_records), scan_id)
 
     return len(records)

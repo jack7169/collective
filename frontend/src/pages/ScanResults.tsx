@@ -130,6 +130,12 @@ export function ScanResults() {
               Similar Directories
             </Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link to={`/scans/${id}/similar`}>
+              <Layers className="h-4 w-4" />
+              Assimilate
+            </Link>
+          </Button>
           <Button
             variant="ghost"
             size="icon"

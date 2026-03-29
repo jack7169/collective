@@ -233,6 +233,50 @@ export interface DuplicateGroup {
   files: DuplicateFileInGroup[];
 }
 
+// Assimilate session types
+export interface AssimilateSession {
+  id: number;
+  scan_id: number;
+  name: string;
+  status: "working" | "previewing" | "committing" | "committed" | "failed";
+  dir_a: string;
+  dir_b: string;
+  staged_operations: StagedOperation[];
+  warnings_acknowledged: string[];
+  preview_result: AssimilatePreview | null;
+  created_at: string | null;
+  updated_at: string | null;
+  committed_at: string | null;
+  error_message: string | null;
+  files_affected: number | null;
+  bytes_affected: number | null;
+}
+
+export interface StagedOperation {
+  type: "copy" | "move" | "delete";
+  source: string;
+  dest?: string;
+  description?: string;
+}
+
+export interface AssimilatePreview {
+  operations_count: number;
+  operations: StagedOperation[];
+  checksums_total: number;
+  checksums_preserved: number;
+  checksums_lost: number;
+  warnings: AssimilateWarning[];
+  all_acknowledged: boolean;
+  bytes_affected: number;
+  ready_to_commit: boolean;
+}
+
+export interface AssimilateWarning {
+  checksum: string;
+  files: string[];
+  acknowledged: boolean;
+}
+
 // Scheduler types (legacy — kept for compat)
 export interface ScanSchedule {
   id: number;
