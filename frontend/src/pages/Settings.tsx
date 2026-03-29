@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Save, Info, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, put } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,10 @@ export function Settings() {
     mutationFn: (data: UserSettings) => put<UserSettings>("/system/settings", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
+      toast.success("Settings saved");
+    },
+    onError: () => {
+      toast.error("Failed to save settings");
     },
   });
 

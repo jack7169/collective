@@ -1,10 +1,13 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronUp,
   Play,
 } from "lucide-react";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useState } from "react";
 import { useCreateScan } from "@/api/scans";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,39 +21,60 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { PathPicker } from "@/components/scan/PathPicker";
+import { toast } from "sonner";
+
+const scanSchema = z.object({
+  name: z.string().min(1, "Scan name is required").max(200),
+  selectedPaths: z.array(z.string()).min(1, "Select at least one path"),
+  depth: z.number().min(1).max(10),
+  threads: z.number().min(0).max(16),
+  customFlags: z.string().optional(),
+});
+
+type ScanFormData = z.infer<typeof scanSchema>;
 
 export function NewScan() {
   const navigate = useNavigate();
   const createScan = useCreateScan();
-
-  const [name, setName] = useState("");
-  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [depth, setDepth] = useState(5);
-  const [threads, setThreads] = useState(0); // 0 = all cores
-  const [customFlags, setCustomFlags] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    formState: { errors },
+  } = useForm<ScanFormData>({
+    resolver: zodResolver(scanSchema),
+    defaultValues: {
+      name: "",
+      selectedPaths: [],
+      depth: 5,
+      threads: 0,
+      customFlags: "",
+    },
+  });
 
-    if (!name.trim() || selectedPaths.length === 0) return;
+  const selectedPaths = watch("selectedPaths");
+  const threads = watch("threads");
 
+  const onSubmit = async (data: ScanFormData) => {
     try {
       const scan = await createScan.mutateAsync({
-        name: name.trim(),
+        name: data.name.trim(),
         scanner: "fclones",
-        target_paths: selectedPaths,
-        scan_depth: depth,
-        // Low threshold to capture everything — user filters post-scan
+        target_paths: data.selectedPaths,
+        scan_depth: data.depth,
         similarity_threshold: 10,
         scanner_flags: {
-          ...(threads > 0 ? { threads: String(threads) } : {}),
-          ...(customFlags.trim() ? { custom: customFlags.trim() } : {}),
+          ...(data.threads > 0 ? { threads: String(data.threads) } : {}),
+          ...(data.customFlags?.trim() ? { custom: data.customFlags.trim() } : {}),
         },
       });
+      toast.success("Scan started");
       navigate(`/scans/${scan.id}/progress`);
     } catch {
-      // Error handled by mutation state
+      toast.error("Failed to start scan");
     }
   };
 
@@ -64,23 +88,22 @@ export function NewScan() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {/* Scan name */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Scan Name</CardTitle>
-            <CardDescription>
-              Give this scan a descriptive name
-            </CardDescription>
+            <CardDescription>Give this scan a descriptive name</CardDescription>
           </CardHeader>
           <CardContent>
             <Input
               placeholder="e.g., Media server cleanup"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              {...register("name")}
               className="h-10"
-              required
             />
+            {errors.name && (
+              <p className="text-xs text-destructive mt-1">{errors.name.message}</p>
+            )}
           </CardContent>
         </Card>
 
@@ -88,15 +111,22 @@ export function NewScan() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Scan Paths</CardTitle>
-            <CardDescription>
-              Select directories to scan for duplicates
-            </CardDescription>
+            <CardDescription>Select directories to scan for duplicates</CardDescription>
           </CardHeader>
           <CardContent>
-            <PathPicker
-              selectedPaths={selectedPaths}
-              onChange={setSelectedPaths}
+            <Controller
+              name="selectedPaths"
+              control={control}
+              render={({ field }) => (
+                <PathPicker
+                  selectedPaths={field.value}
+                  onChange={field.onChange}
+                />
+              )}
             />
+            {errors.selectedPaths && (
+              <p className="text-xs text-destructive mt-1">{errors.selectedPaths.message}</p>
+            )}
           </CardContent>
         </Card>
 
@@ -110,9 +140,7 @@ export function NewScan() {
             >
               <div className="text-left">
                 <CardTitle className="text-base">Advanced Options</CardTitle>
-                <CardDescription>
-                  CPU threads, similarity depth, and custom flags
-                </CardDescription>
+                <CardDescription>CPU threads, similarity depth, and custom flags</CardDescription>
               </div>
               {showAdvanced ? (
                 <ChevronUp className="h-5 w-5 text-muted-foreground" />
@@ -131,12 +159,18 @@ export function NewScan() {
                     {threads === 0 ? "All cores" : threads}
                   </span>
                 </div>
-                <Slider
-                  value={[threads]}
-                  onValueChange={([v]) => setThreads(v ?? 0)}
-                  min={0}
-                  max={16}
-                  step={1}
+                <Controller
+                  name="threads"
+                  control={control}
+                  render={({ field }) => (
+                    <Slider
+                      value={[field.value]}
+                      onValueChange={([v]) => field.onChange(v ?? 0)}
+                      min={0}
+                      max={16}
+                      step={1}
+                    />
+                  )}
                 />
                 <p className="text-xs text-muted-foreground">
                   Number of CPU threads for file hashing. 0 = use all available cores.
@@ -149,20 +183,29 @@ export function NewScan() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium">Similarity Depth</label>
-                  <span className="text-sm text-muted-foreground">
-                    {depth}
-                  </span>
+                  <Controller
+                    name="depth"
+                    control={control}
+                    render={({ field }) => (
+                      <span className="text-sm text-muted-foreground">{field.value}</span>
+                    )}
+                  />
                 </div>
-                <Slider
-                  value={[depth]}
-                  onValueChange={([v]) => setDepth(v ?? 5)}
-                  min={1}
-                  max={10}
-                  step={1}
+                <Controller
+                  name="depth"
+                  control={control}
+                  render={({ field }) => (
+                    <Slider
+                      value={[field.value]}
+                      onValueChange={([v]) => field.onChange(v ?? 5)}
+                      min={1}
+                      max={10}
+                      step={1}
+                    />
+                  )}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Directory depth for similarity grouping. Higher = more
-                  granular comparison of nested folders.
+                  Directory depth for similarity grouping. Higher = more granular comparison.
                 </p>
               </div>
 
@@ -172,9 +215,8 @@ export function NewScan() {
               <div className="space-y-3">
                 <label className="text-sm font-medium">Custom Scanner Flags</label>
                 <textarea
-                  value={customFlags}
-                  onChange={(e) => setCustomFlags(e.target.value)}
-                  placeholder="e.g., --min-size 1M --max-size 10G"
+                  {...register("customFlags")}
+                  placeholder="e.g., --min 1M --max 10G"
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -195,11 +237,7 @@ export function NewScan() {
           <Button
             type="submit"
             size="lg"
-            disabled={
-              !name.trim() ||
-              selectedPaths.length === 0 ||
-              createScan.isPending
-            }
+            disabled={createScan.isPending}
           >
             {createScan.isPending ? (
               "Starting scan..."
@@ -211,12 +249,6 @@ export function NewScan() {
             )}
           </Button>
         </div>
-
-        {createScan.isError && (
-          <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
-            Failed to start scan. Please check your configuration and try again.
-          </div>
-        )}
       </form>
     </div>
   );

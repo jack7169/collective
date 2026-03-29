@@ -5,6 +5,7 @@ import {
   ArrowUp,
   ArrowDown,
   GitCompare,
+  Layers,
   Filter,
   FolderOpen,
   Files,
@@ -429,13 +430,22 @@ export function SimilarDirectories() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Button asChild variant="ghost" size="sm">
-                            <Link
-                              to={`/scans/${id}/compare?a=${encodeURIComponent(pair.dir_a)}&b=${encodeURIComponent(pair.dir_b)}`}
-                            >
-                              <GitCompare className="h-4 w-4" />
-                            </Link>
-                          </Button>
+                          <div className="flex gap-1">
+                            <Button asChild variant="ghost" size="sm" title="Compare">
+                              <Link
+                                to={`/scans/${id}/compare?a=${encodeURIComponent(pair.dir_a)}&b=${encodeURIComponent(pair.dir_b)}`}
+                              >
+                                <GitCompare className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                            <Button asChild variant="ghost" size="sm" title="Assimilate">
+                              <Link
+                                to={`/scans/${id}/assimilate?a=${encodeURIComponent(pair.dir_a)}&b=${encodeURIComponent(pair.dir_b)}`}
+                              >
+                                <Layers className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}

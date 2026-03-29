@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatBytes, formatNumber } from "@/lib/format";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const phaseConfig: Record<
@@ -306,7 +307,12 @@ export function ScanProgress() {
           <Button
             variant="outline"
             onClick={() => {
-              if (id) resumeScan.mutate(id);
+              if (id) {
+                resumeScan.mutate(id, {
+                  onSuccess: () => toast.success("Scan resumed"),
+                  onError: () => toast.error("Failed to resume scan"),
+                });
+              }
             }}
             disabled={resumeScan.isPending}
           >

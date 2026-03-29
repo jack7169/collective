@@ -6,6 +6,7 @@ import {
   Link,
   Clock,
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardContent,
@@ -114,15 +115,10 @@ export function DuplicateGroupCard({
                       : "hover:bg-accent/50 border border-transparent"
                 )}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={isSelected}
                   disabled={file.is_original}
-                  onChange={() => onToggle(file.id)}
-                  className={cn(
-                    "h-4 w-4 rounded border-border accent-primary",
-                    file.is_original && "opacity-30 cursor-not-allowed"
-                  )}
+                  onCheckedChange={() => onToggle(file.id)}
                 />
                 {file.is_original && (
                   <Shield className="h-3.5 w-3.5 text-success shrink-0" />
