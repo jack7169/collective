@@ -103,6 +103,12 @@ async def resume_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
     if not scan.interrupted_phase and scan.status in ("failed", "cancelled"):
         scan.interrupted_phase = "running"
 
+    # Set status to interrupted so the task picks it up (task exits early on "cancelled")
+    scan.status = "interrupted"
+    scan.error_message = None
+    scan.completed_at = None
+    await db.commit()
+
     try:
         from app.tasks.scan_tasks import run_scan_task
         run_scan_task(scan.id)
