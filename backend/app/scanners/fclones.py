@@ -40,14 +40,24 @@ class FclonesBackend(ScannerBackend):
         if tagged_paths:
             all_paths.extend(tagged_paths)
 
+        # Use a per-scan cache directory to avoid lock contention
+        cache_dir = output_path.rsplit(".", 1)[0] + "_fclones_cache"
+        os.makedirs(cache_dir, exist_ok=True)
+
         cmd.extend(all_paths)
         cmd.extend([
             "--cache",
-            "--threads", "0",       # Use all available CPU cores
+            "--cache-dir", cache_dir,
             "--min", "4096",        # Skip tiny files (<4KB)
             "-f", "json",
             "-o", output_path,
         ])
+
+        # Set thread pool to use all cores (fclones default is conservative)
+        # Format: main pool size, sequential pool size
+        import multiprocessing
+        ncpu = multiprocessing.cpu_count()
+        cmd.extend(["--threads", f"default:{ncpu},{ncpu}"])
 
         if len(all_paths) > 1:
             cmd.append("--isolate")
