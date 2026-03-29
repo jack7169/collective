@@ -66,7 +66,7 @@ function estimateRemaining(elapsed: number, percent: number): string | null {
 export function ScanProgress() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { progress, isConnected } = useScanProgress(id);
+  const { progress, isConnected, reconnect } = useScanProgress(id);
   const { data: scan } = useScan(id);
   const cancelScan = useCancelScan();
   const resumeScan = useResumeScan();
@@ -296,7 +296,10 @@ export function ScanProgress() {
             onClick={() => {
               if (id) {
                 resumeScan.mutate(id, {
-                  onSuccess: () => toast.success("Scan resumed"),
+                  onSuccess: () => {
+                    toast.success("Scan resumed");
+                    reconnect(); // Force WebSocket reconnect to pick up new status
+                  },
                   onError: () => toast.error("Failed to resume scan"),
                 });
               }
