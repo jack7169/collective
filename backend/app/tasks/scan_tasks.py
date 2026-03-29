@@ -75,12 +75,12 @@ def run_scan_task(scan_id: int):
             skip_scanner = True
             skip_parsing = True
             logger.info("Scan %d: resuming from analyzing phase", scan_id)
-        elif resume_phase == "parsing" and os.path.exists(output_path):
-            # Output file exists, skip scanner
+        elif resume_phase in ("parsing", "running") and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            # Output file exists and is non-empty — scanner finished, skip to parsing
             skip_scanner = True
-            logger.info("Scan %d: resuming from parsing phase (output file exists)", scan_id)
+            logger.info("Scan %d: output file exists (%d bytes), skipping scanner", scan_id, os.path.getsize(output_path))
         elif resume_phase:
-            logger.info("Scan %d: resuming from %s phase (re-running scanner with cache)", scan_id, resume_phase)
+            logger.info("Scan %d: resuming from %s phase (re-running scanner, cached hashes speed up steps 1-5)", scan_id, resume_phase)
 
         # Clear resume state
         scan.interrupted_phase = None
@@ -96,7 +96,7 @@ def run_scan_task(scan_id: int):
                 scan.progress_percent = 0.0
                 scan.progress_message = "Starting scan..."
             else:
-                scan.progress_message = "Resuming scan (cached hashes will speed this up)..."
+                scan.progress_message = "Resuming scan — cached file hashes make steps 1-5 near-instant..."
             session.commit()
 
         # Select scanner backend with auto-fallback

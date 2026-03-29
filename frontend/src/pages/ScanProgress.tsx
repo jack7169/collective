@@ -75,18 +75,12 @@ export function ScanProgress() {
   const rawStatus = progress?.status ?? scan?.status ?? "pending";
   const phase = rawStatus === "running" ? "hashing" : rawStatus;
 
-  // Auto-navigate when completed or cancelled
+  // Auto-navigate when completed (not cancelled — user may want to resume)
   useEffect(() => {
     if (rawStatus === "completed") {
       const timer = setTimeout(() => {
         navigate(`/scans/${id}`, { replace: true });
       }, 2000);
-      return () => clearTimeout(timer);
-    }
-    if (rawStatus === "cancelled") {
-      const timer = setTimeout(() => {
-        navigate("/", { replace: true });
-      }, 1500);
       return () => clearTimeout(timer);
     }
   }, [rawStatus, id, navigate]);
@@ -281,33 +275,24 @@ export function ScanProgress() {
           </Button>
         </div>
       )}
-      {rawStatus === "cancelled" && (
-        <p className="text-center text-sm text-muted-foreground">
-          Scan cancelled. Redirecting to dashboard...
-        </p>
-      )}
-      {/* Interrupted banner with resume */}
-      {rawStatus === "interrupted" && (
-        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 text-center space-y-3">
-          <p className="text-sm text-amber-400">
-            This scan was interrupted. Progress has been saved and the scan will resume from where it left off.
+      {/* Resume banner for cancelled/interrupted/failed */}
+      {(rawStatus === "cancelled" || rawStatus === "interrupted" || rawStatus === "failed") && (
+        <div className={cn(
+          "rounded-md p-4 text-center space-y-3 border",
+          rawStatus === "interrupted" ? "border-amber-500/50 bg-amber-500/10" :
+          rawStatus === "failed" ? "border-destructive/50 bg-destructive/10" :
+          "border-border bg-muted/50"
+        )}>
+          <p className={cn("text-sm",
+            rawStatus === "interrupted" ? "text-amber-400" :
+            rawStatus === "failed" ? "text-destructive" :
+            "text-muted-foreground"
+          )}>
+            {rawStatus === "interrupted" && "This scan was interrupted. Progress has been saved."}
+            {rawStatus === "cancelled" && "This scan was cancelled."}
+            {rawStatus === "failed" && `Scan failed${scan?.error_message ? `: ${scan.error_message.slice(0, 100)}` : "."}`}
           </p>
           <Button
-            onClick={() => {
-              if (id) resumeScan.mutate(id);
-            }}
-            disabled={resumeScan.isPending}
-          >
-            <RotateCcw className="h-4 w-4" />
-            {resumeScan.isPending ? "Resuming..." : "Resume Scan"}
-          </Button>
-        </div>
-      )}
-      {/* Failed with resume option */}
-      {rawStatus === "failed" && (
-        <div className="flex justify-center">
-          <Button
-            variant="outline"
             onClick={() => {
               if (id) {
                 resumeScan.mutate(id, {
