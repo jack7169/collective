@@ -50,7 +50,8 @@ class ScanProgress(BaseModel):
     total_dirs: Optional[int] = None
     total_size: Optional[int] = None
     duplicates_found: Optional[int] = None
-    elapsed_seconds: Optional[int] = None
+    elapsed_seconds: Optional[int] = None     # Current run elapsed
+    total_elapsed_seconds: Optional[int] = None  # All runs combined
     started_at: Optional[datetime] = None
 
 

@@ -52,6 +52,8 @@ async def init_db():
     async with engine.begin() as conn:
         for table, column, col_type in [
             ("scans", "interrupted_phase", "TEXT"),
+            ("scans", "resumed_at", "TIMESTAMP"),
+            ("scans", "accumulated_seconds", "INTEGER DEFAULT 0"),
         ]:
             try:
                 await conn.execute(

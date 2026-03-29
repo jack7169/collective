@@ -174,11 +174,18 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     break
 
                 from datetime import datetime, timezone
-                elapsed = None
-                if scan.started_at:
-                    now = datetime.now(timezone.utc)
-                    started = scan.started_at if scan.started_at.tzinfo else scan.started_at.replace(tzinfo=timezone.utc)
-                    elapsed = int((now - started).total_seconds())
+                now = datetime.now(timezone.utc)
+
+                # Current run elapsed (from resumed_at or started_at)
+                run_elapsed = None
+                ref_time = scan.resumed_at or scan.started_at
+                if ref_time:
+                    ref = ref_time if ref_time.tzinfo else ref_time.replace(tzinfo=timezone.utc)
+                    run_elapsed = int((now - ref).total_seconds())
+
+                # Total elapsed = accumulated from previous runs + current run
+                accumulated = scan.accumulated_seconds or 0
+                total_elapsed = accumulated + (run_elapsed or 0) if run_elapsed is not None else accumulated or None
 
                 progress = ScanProgress(
                     scan_id=scan.id,
@@ -189,7 +196,8 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     total_dirs=scan.total_dirs,
                     total_size=scan.total_size,
                     duplicates_found=scan.duplicates_found,
-                    elapsed_seconds=elapsed,
+                    elapsed_seconds=run_elapsed,
+                    total_elapsed_seconds=total_elapsed,
                     started_at=scan.started_at,
                 )
                 await websocket.send_json(progress.model_dump(mode="json"))

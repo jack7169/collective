@@ -88,7 +88,8 @@ export function ScanProgress() {
   const phaseInfo = phaseConfig[phase] ?? phaseConfig["hashing"]!;
   const PhaseIcon = phaseInfo.icon;
   const percent = progress?.progress_percent ?? scan?.progress_percent ?? 0;
-  const elapsed = progress?.elapsed_seconds ?? null;
+  const runElapsed = progress?.elapsed_seconds ?? null;
+  const totalElapsed = progress?.total_elapsed_seconds ?? null;
   const isActive = ["running", "parsing", "analyzing", "pending"].includes(rawStatus);
 
   // Show "--" for metrics that aren't available yet during active scans
@@ -101,7 +102,8 @@ export function ScanProgress() {
     return formatter(0);
   }
 
-  const eta = elapsed != null && percent > 0 ? estimateRemaining(elapsed, percent) : null;
+  const eta = totalElapsed != null && percent > 0 ? estimateRemaining(totalElapsed, percent) : null;
+  const isResumed = totalElapsed != null && runElapsed != null && totalElapsed > runElapsed + 5;
 
   const metricCards = [
     {
@@ -177,22 +179,25 @@ export function ScanProgress() {
                 "h-2",
                 percent < 2 && isActive
                   ? "[&>div]:animate-pulse [&>div]:w-full [&>div]:bg-primary/40"
-                  : percent > 80
-                    ? "[&>div]:bg-red-500"
-                    : percent > 60
-                      ? "[&>div]:bg-amber-500"
-                      : "[&>div]:bg-green-500"
+                  : "[&>div]:bg-primary"
               )}
             />
 
             {/* Elapsed time + ETA bar — always visible during active scan */}
             {isActive && (
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <Clock className="h-3 w-3" />
-                  <span className="tabular-nums">
-                    Elapsed: {elapsed != null ? formatElapsed(elapsed) : "--"}
-                  </span>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-3 w-3" />
+                    <span className="tabular-nums">
+                      Run: {runElapsed != null ? formatElapsed(runElapsed) : "--"}
+                    </span>
+                  </div>
+                  {isResumed && (
+                    <span className="tabular-nums text-muted-foreground/70">
+                      Total: {totalElapsed != null ? formatElapsed(totalElapsed) : "--"}
+                    </span>
+                  )}
                 </div>
                 {eta ? (
                   <div className="flex items-center gap-1.5">

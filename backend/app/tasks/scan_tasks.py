@@ -82,10 +82,13 @@ def run_scan_task(scan_id: int):
         elif resume_phase:
             logger.info("Scan %d: resuming from %s phase (re-running scanner, cached hashes speed up steps 1-5)", scan_id, resume_phase)
 
-        # Clear resume state
+        # Clear resume state and track run timing
         scan.interrupted_phase = None
         scan.error_message = None
         scan.completed_at = None
+        scan.resumed_at = datetime.now(timezone.utc)
+        if not scan.accumulated_seconds:
+            scan.accumulated_seconds = 0
 
         if not skip_scanner:
             # Update status to running

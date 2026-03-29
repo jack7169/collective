@@ -54,7 +54,8 @@ export interface ScanProgress {
   total_dirs: number | null;
   total_size: number | null;
   duplicates_found: number | null;
-  elapsed_seconds: number | null;
+  elapsed_seconds: number | null;     // Current run
+  total_elapsed_seconds: number | null; // All runs combined
   started_at: string | null;
 }
 

@@ -49,6 +49,10 @@ async def _recover_orphaned_tasks():
                     scan.completed_at = datetime.now(timezone.utc)
                     logger.error("Failed to re-enqueue scan %d: %s", scan.id, e)
             else:
+                # Accumulate elapsed time from this run before marking interrupted
+                if scan.resumed_at:
+                    run_elapsed = int((datetime.now(timezone.utc) - scan.resumed_at.replace(tzinfo=timezone.utc)).total_seconds())
+                    scan.accumulated_seconds = (scan.accumulated_seconds or 0) + run_elapsed
                 scan.interrupted_phase = prev_phase
                 scan.status = "interrupted"
                 scan.error_message = f"Interrupted during {prev_phase} by restart"
