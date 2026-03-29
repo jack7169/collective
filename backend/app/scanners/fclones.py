@@ -82,8 +82,8 @@ class FclonesBackend(ScannerBackend):
 
             if isinstance(group, dict):
                 files = group.get("files", group.get("paths", []))
-                checksum = group.get("hash", group.get("checksum", f"group_{group_idx}"))
-                file_size = group.get("size", 0)
+                checksum = group.get("file_hash", group.get("hash", group.get("checksum", f"group_{group_idx}")))
+                file_size = group.get("file_len", group.get("size", 0))
             elif isinstance(group, list):
                 files = group
                 checksum = f"group_{group_idx}"

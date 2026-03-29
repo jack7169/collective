@@ -92,6 +92,34 @@ class TestFclonesParseOutput:
         results = list(backend.parse_output(str(output_file)))
         assert len(results) == 2
 
+    def test_parse_v035_format(self, tmp_path):
+        """fclones 0.35 uses file_len/file_hash instead of size/hash, files as strings."""
+        output = {
+            "header": {
+                "version": "0.35.0",
+                "stats": {"total_file_size": 12, "redundant_file_size": 6},
+            },
+            "groups": [
+                {
+                    "file_len": 500,
+                    "file_hash": "deadbeef123",
+                    "files": ["/data/a/doc.txt", "/data/b/doc.txt"],
+                }
+            ],
+        }
+        output_file = tmp_path / "output.json"
+        output_file.write_text(json.dumps(output))
+
+        backend = FclonesBackend()
+        results = list(backend.parse_output(str(output_file)))
+        assert len(results) == 2
+        assert results[0].checksum == "deadbeef123"
+        assert results[0].size == 500
+        assert results[1].size == 500
+        assert results[0].is_original is True
+        assert results[1].is_original is False
+        assert results[0].path == "/data/a/doc.txt"
+
     def test_parse_missing_file(self):
         backend = FclonesBackend()
         results = list(backend.parse_output("/nonexistent.json"))

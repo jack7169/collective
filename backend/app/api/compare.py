@@ -49,42 +49,49 @@ async def compare_directories(
     unique_checksums_a = set(checksums_a.keys()) - shared_checksums
     unique_checksums_b = set(checksums_b.keys()) - shared_checksums
 
-    def file_info(f: DuplicateFile) -> dict:
+    def file_response(f: DuplicateFile) -> dict:
         return {
+            "name": os.path.basename(f.path),
             "path": f.path,
             "size": f.size,
+            "mtime": f.mtime if hasattr(f, "mtime") and f.mtime else "",
             "checksum": f.checksum,
-            "is_original": f.is_original,
         }
 
-    shared = []
+    # Build shared_files list matching frontend CompareFile type
+    shared_files = []
+    shared_size = 0
     for cksum in shared_checksums:
-        shared.append({
-            "checksum": cksum,
-            "in_a": [files_a[p].path for p in checksums_a[cksum]],
-            "in_b": [files_b[p].path for p in checksums_b[cksum]],
-            "size": files_a[checksums_a[cksum][0]].size,
-        })
+        first_rel = checksums_a[cksum][0]
+        f = files_a[first_rel]
+        shared_files.append(file_response(f))
+        shared_size += f.size
 
-    unique_a = []
+    only_in_a = []
+    only_a_size = 0
     for cksum in unique_checksums_a:
         for rel in checksums_a[cksum]:
-            unique_a.append(file_info(files_a[rel]))
+            f = files_a[rel]
+            only_in_a.append(file_response(f))
+            only_a_size += f.size
 
-    unique_b = []
+    only_in_b = []
+    only_b_size = 0
     for cksum in unique_checksums_b:
         for rel in checksums_b[cksum]:
-            unique_b.append(file_info(files_b[rel]))
+            f = files_b[rel]
+            only_in_b.append(file_response(f))
+            only_b_size += f.size
 
     return {
         "dir_a": dir_a,
         "dir_b": dir_b,
-        "shared": shared,
-        "unique_to_a": unique_a,
-        "unique_to_b": unique_b,
-        "shared_count": len(shared),
-        "unique_to_a_count": len(unique_a),
-        "unique_to_b_count": len(unique_b),
+        "shared_files": shared_files,
+        "only_in_a": only_in_a,
+        "only_in_b": only_in_b,
+        "shared_size": shared_size,
+        "only_a_size": only_a_size,
+        "only_b_size": only_b_size,
     }
 
 

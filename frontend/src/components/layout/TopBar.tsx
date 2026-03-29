@@ -1,6 +1,7 @@
 import { useLocation, Link } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { useSystemHealth } from "@/hooks/useBrowse";
+import { useScan } from "@/api/scans";
 import { cn } from "@/lib/utils";
 
 const routeNames: Record<string, string> = {
@@ -11,7 +12,12 @@ const routeNames: Record<string, string> = {
   "/settings": "Settings",
 };
 
-function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
+function extractScanId(pathname: string): string | undefined {
+  const match = pathname.match(/^\/scans\/(\d+)/);
+  return match?.[1];
+}
+
+function getBreadcrumbs(pathname: string, scanName?: string): { label: string; path: string }[] {
   const crumbs: { label: string; path: string }[] = [];
 
   if (pathname === "/") {
@@ -30,18 +36,22 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
   if (parts[0] === "scans" && parts[1]) {
     crumbs.push({ label: "Scans", path: "/" });
     const scanId = parts[1];
+    const label = scanName || `Scan ${scanId}`;
 
     if (parts[2] === "progress") {
-      crumbs.push({ label: `Scan ${scanId.slice(0, 8)}`, path: `/scans/${scanId}` });
+      crumbs.push({ label, path: `/scans/${scanId}` });
       crumbs.push({ label: "Progress", path: pathname });
     } else if (parts[2] === "similar") {
-      crumbs.push({ label: `Scan ${scanId.slice(0, 8)}`, path: `/scans/${scanId}` });
+      crumbs.push({ label, path: `/scans/${scanId}` });
       crumbs.push({ label: "Similar Directories", path: pathname });
     } else if (parts[2] === "compare") {
-      crumbs.push({ label: `Scan ${scanId.slice(0, 8)}`, path: `/scans/${scanId}` });
+      crumbs.push({ label, path: `/scans/${scanId}` });
       crumbs.push({ label: "Compare", path: pathname });
+    } else if (parts[2] === "assimilate") {
+      crumbs.push({ label, path: `/scans/${scanId}` });
+      crumbs.push({ label: "Assimilate", path: pathname });
     } else {
-      crumbs.push({ label: `Scan ${scanId.slice(0, 8)}`, path: pathname });
+      crumbs.push({ label, path: pathname });
     }
   }
 
@@ -51,7 +61,9 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
 export function TopBar() {
   const location = useLocation();
   const { data: health } = useSystemHealth();
-  const breadcrumbs = getBreadcrumbs(location.pathname);
+  const scanId = extractScanId(location.pathname);
+  const { data: scan } = useScan(scanId);
+  const breadcrumbs = getBreadcrumbs(location.pathname, scan?.name);
 
   const isHealthy = health?.status === "ok";
 
