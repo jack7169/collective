@@ -11,6 +11,7 @@ import {
   FileText,
   AlertTriangle,
   Layers,
+  Loader2,
 } from "lucide-react";
 import {
   Panel,
@@ -153,6 +154,7 @@ export function DirectoryCompare() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
         Loading comparison...
       </div>
     );
@@ -358,9 +360,15 @@ export function DirectoryCompare() {
                     {TreeNode}
                   </Tree>
                 ) : (
-                  <p className="py-8 text-center text-sm text-muted-foreground">
-                    Loading tree...
-                  </p>
+                  <div className="flex flex-col items-center justify-center py-12 gap-3">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">
+                      Loading directory tree...
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Scanning filesystem — comparison data is shown above
+                    </p>
+                  </div>
                 )}
               </ScrollArea>
             </Panel>
