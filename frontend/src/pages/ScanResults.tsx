@@ -1,10 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
-  FolderSync,
-  HardDrive,
-  BarChart3,
-  ArrowRight,
   Trash2,
   BookmarkPlus,
   BookmarkCheck,
@@ -18,7 +14,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -26,9 +21,10 @@ import { Badge } from "@/components/ui/badge";
 import { StatsCards } from "@/components/results/StatsCards";
 import { SpaceChart } from "@/components/results/SpaceChart";
 import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
+import { SimilarDirectoriesTab } from "@/components/results/SimilarDirectoriesTab";
 import { ActionQueuePanel } from "@/components/common/ActionQueuePanel";
 import { useActionQueue } from "@/hooks/useActionQueue";
-import { formatBytes, formatDate } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
@@ -120,18 +116,6 @@ export function ScanResults() {
               Saved
             </Badge>
           )}
-          <Button asChild variant="outline">
-            <Link to={`/scans/${id}/similar`}>
-              <FolderSync className="h-4 w-4" />
-              Similar Directories
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link to={`/scans/${id}/similar`}>
-              <Layers className="h-4 w-4" />
-              Assimilate
-            </Link>
-          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -237,23 +221,9 @@ export function ScanResults() {
           )}
         </TabsContent>
 
-        {/* Similar Directories (link) */}
+        {/* Similar Directories */}
         <TabsContent value="similar">
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <FolderSync className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground mb-4">
-                View directory similarity analysis with advanced filtering
-              </p>
-              <Button asChild>
-                <Link to={`/scans/${id}/similar`}>
-                  <BarChart3 className="h-4 w-4" />
-                  Open Similar Directories
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
+          {id && <SimilarDirectoriesTab scanId={id} />}
         </TabsContent>
       </Tabs>
 

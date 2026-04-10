@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import Base
 from app.models.duplicate import DuplicateDirectory, DuplicateFile
+from app.models.saved_scan import SavedScan
 from app.models.scan import Scan
 from app.models.similarity import DirectorySimilarity
 from app.scanners.base import DuplicateDirResult, DuplicateFileResult
@@ -405,6 +406,32 @@ def run_scan_task(scan_id: int):
         scan.progress_message = f"Done. Found {duplicates} duplicates, {similarity_count} similar directory pairs."
         scan.completed_at = datetime.now(timezone.utc)
         session.commit()
+
+        # Auto-save: create a SavedScan if this scan isn't already linked to one
+        if not scan.saved_scan_id:
+            try:
+                saved = SavedScan(
+                    name=scan.name,
+                    scanner=scan.scanner,
+                    target_paths=scan.target_paths,
+                    tagged_paths=scan.tagged_paths,
+                    scanner_flags=scan.scanner_flags,
+                    scan_depth=scan.scan_depth,
+                    similarity_threshold=scan.similarity_threshold,
+                    last_scan_id=scan.id,
+                    last_run_at=scan.completed_at,
+                    total_runs=1,
+                    last_total_files=scan.total_files,
+                    last_duplicates_found=scan.duplicates_found,
+                    last_space_recoverable=scan.space_recoverable,
+                )
+                session.add(saved)
+                session.flush()
+                scan.saved_scan_id = saved.id
+                session.commit()
+                logger.info("Auto-saved scan %d as saved scan %d", scan_id, saved.id)
+            except Exception as e:
+                logger.warning("Failed to auto-save scan %d: %s", scan_id, e)
 
         # Clean up output file and fclones cache dir
         try:
