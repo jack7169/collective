@@ -1,149 +1,161 @@
-import {
-  ChevronDown,
-  Shield,
-  Files,
-  Trash2,
-  Link,
-  Clock,
-} from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Shield, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { formatBytes, formatDate } from "@/lib/format";
+import { Badge } from "@/components/ui/badge";
+import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DuplicateGroup } from "@/api/types";
+import type { SuggestedKeeper } from "@/hooks/useKeeperSelection";
 
 interface DuplicateGroupCardProps {
   group: DuplicateGroup;
-  selected: Set<number>;
-  onToggle: (fileId: number) => void;
-  onSelectAllDuplicates: (group: DuplicateGroup) => void;
-  onSelectExceptOldest: (group: DuplicateGroup) => void;
-  onSelectExceptNewest: (group: DuplicateGroup) => void;
-  onClearGroup: (group: DuplicateGroup) => void;
+  keeperFileId: number | undefined;
+  suggestion: SuggestedKeeper | undefined;
+  onSetKeeper: (checksum: string, fileId: number) => void;
+  onClearKeeper: (checksum: string) => void;
+  onAcceptSuggestion: (checksum: string) => void;
 }
 
 export function DuplicateGroupCard({
   group,
-  selected,
-  onToggle,
-  onSelectAllDuplicates,
-  onSelectExceptOldest,
-  onSelectExceptNewest,
-  onClearGroup,
+  keeperFileId,
+  suggestion,
+  onSetKeeper,
+  onClearKeeper,
+  onAcceptSuggestion,
 }: DuplicateGroupCardProps) {
-  const groupSelectedCount = group.files.filter((f) =>
-    selected.has(f.id)
-  ).length;
+  const isResolved = keeperFileId != null;
+  const reclaimable = isResolved
+    ? group.files
+        .filter((f) => f.id !== keeperFileId)
+        .reduce((sum, f) => sum + f.size, 0)
+    : 0;
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-xs font-mono text-muted-foreground">
-              {group.checksum.slice(0, 16)}...
-            </CardTitle>
-            <Badge variant="outline" className="text-xs">
-              <Files className="h-3 w-3 mr-1" />
-              {group.file_count} copies
-            </Badge>
-            <Badge variant="secondary" className="text-xs">
-              {formatBytes(group.total_size)}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-1">
-            {groupSelectedCount > 0 && (
-              <Badge variant="default" className="text-xs">
-                {groupSelectedCount} selected
-              </Badge>
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => onSelectAllDuplicates(group)}>
-                  <Trash2 className="h-3.5 w-3.5 mr-2 text-destructive" />
-                  Select all duplicates
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelectExceptOldest(group)}>
-                  <Clock className="h-3.5 w-3.5 mr-2" />
-                  Select all except oldest
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onSelectExceptNewest(group)}>
-                  <Clock className="h-3.5 w-3.5 mr-2" />
-                  Select all except newest
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => onClearGroup(group)}>
-                  Clear selection
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+    <div
+      className={cn(
+        "rounded-lg border bg-card",
+        isResolved
+          ? "border-success/30"
+          : suggestion
+            ? "border-primary/20"
+            : "border-border"
+      )}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="text-xs">
+            {group.file_count} copies
+          </Badge>
+          <span className="text-sm text-muted-foreground">
+            {formatBytes(group.files[0]?.size ?? 0)} each
+          </span>
+          {isResolved && (
+            <>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-sm text-destructive font-medium">
+                saving {formatBytes(reclaimable)}
+              </span>
+            </>
+          )}
         </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="space-y-0.5">
-          {group.files.map((file) => {
-            const isSelected = selected.has(file.id);
-            return (
-              <label
-                key={file.id}
+        <div className="flex items-center gap-2">
+          {isResolved && (
+            <Badge variant="success" className="text-xs">
+              <Check className="h-3 w-3 mr-1" />
+              Resolved
+            </Badge>
+          )}
+          {!isResolved && suggestion && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs text-primary border-primary/30"
+              onClick={() => onAcceptSuggestion(group.checksum)}
+            >
+              Accept Suggestion
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* File list */}
+      <div className="divide-y divide-border">
+        {group.files.map((file) => {
+          const isKeeper = file.id === keeperFileId;
+          const isDoomed = isResolved && !isKeeper;
+          const isSuggested =
+            !isResolved && suggestion?.suggestedFileId === file.id;
+
+          return (
+            <div
+              key={file.id}
+              className={cn(
+                "flex items-center gap-3 px-4 py-2.5",
+                isKeeper && "bg-success/5",
+                isDoomed && "bg-destructive/5 opacity-60",
+                isSuggested && "border-l-2 border-l-primary"
+              )}
+            >
+              {/* Status badge / action button */}
+              <div className="shrink-0 w-24">
+                {isKeeper ? (
+                  <button
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-success bg-success/15 px-2.5 py-1 rounded cursor-pointer hover:bg-success/25 transition-colors"
+                    onClick={() => onClearKeeper(group.checksum)}
+                    title="Click to unmark as keeper"
+                  >
+                    <Shield className="h-3 w-3" />
+                    KEEP
+                  </button>
+                ) : isDoomed ? (
+                  <span className="inline-flex items-center text-[10px] font-semibold text-destructive bg-destructive/15 px-2.5 py-1 rounded">
+                    DELETE
+                  </span>
+                ) : isSuggested ? (
+                  <button
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary bg-primary/10 border border-dashed border-primary/30 px-2.5 py-1 rounded cursor-pointer hover:bg-primary/20 transition-colors"
+                    onClick={() => onSetKeeper(group.checksum, file.id)}
+                  >
+                    Suggested
+                  </button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[10px] px-2.5 text-success border-success/30 hover:bg-success/10"
+                    onClick={() => onSetKeeper(group.checksum, file.id)}
+                  >
+                    Keep
+                  </Button>
+                )}
+              </div>
+
+              {/* Path */}
+              <div
                 className={cn(
-                  "flex items-center gap-3 rounded px-3 py-2 text-sm cursor-pointer transition-colors",
-                  file.is_original
-                    ? "bg-success/5 border border-success/20"
-                    : isSelected
-                      ? "bg-primary/10 border border-primary/30"
-                      : "hover:bg-accent/50 border border-transparent"
+                  "flex-1 font-mono text-xs break-all leading-relaxed",
+                  isDoomed
+                    ? "text-muted-foreground line-through"
+                    : "text-foreground"
                 )}
               >
-                <Checkbox
-                  checked={isSelected}
-                  disabled={file.is_original}
-                  onCheckedChange={() => onToggle(file.id)}
-                />
-                {file.is_original && (
-                  <Shield className="h-3.5 w-3.5 text-success shrink-0" />
-                )}
-                <span className="font-mono text-xs truncate flex-1 min-w-0">
-                  {file.path}
-                </span>
-                <span className="text-xs text-muted-foreground shrink-0">
-                  {formatBytes(file.size)}
-                </span>
-                <span className="text-xs text-muted-foreground shrink-0 w-20 text-right">
+                {file.path}
+              </div>
+
+              {/* Metadata */}
+              <div className="shrink-0 flex items-center gap-4 text-[11px] text-muted-foreground">
+                <span>{formatBytes(file.size)}</span>
+                <span className="w-20 text-right">
                   {file.mtime
-                    ? formatDate(new Date(file.mtime * 1000).toISOString())
-                    : "--"}
+                    ? new Date(file.mtime * 1000).toISOString().slice(0, 10)
+                    : "—"}
                 </span>
-                {file.is_original && (
-                  <Badge variant="success" className="text-[10px] shrink-0">
-                    original
-                  </Badge>
-                )}
-              </label>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

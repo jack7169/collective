@@ -409,3 +409,136 @@ async def get_tagged_originals(
     return {
         "tagged_paths": scan.tagged_paths or [],
     }
+
+
+class KeeperDecisionItem(BaseModel):
+    group_checksum: str
+    kept_file_id: int
+
+
+class SuggestKeepersRequest(BaseModel):
+    decisions: list[KeeperDecisionItem]
+
+
+class SuggestedKeeperItem(BaseModel):
+    group_checksum: str
+    suggested_file_id: int
+    confidence: float
+    reason: str
+
+
+class SuggestKeepersResponse(BaseModel):
+    suggestions: list[SuggestedKeeperItem]
+    pattern: Optional[dict] = None
+
+
+@router.post("/suggest-keepers")
+async def suggest_keepers(
+    scan_id: int,
+    body: SuggestKeepersRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Analyze user keeper decisions and suggest keepers for remaining groups."""
+    await _get_scan_or_404(db, scan_id)
+
+    if len(body.decisions) < 3:
+        return SuggestKeepersResponse(suggestions=[], pattern=None)
+
+    # Fetch the kept files to extract their paths
+    kept_ids = [d.kept_file_id for d in body.decisions]
+    result = await db.execute(
+        select(DuplicateFile).where(
+            DuplicateFile.scan_id == scan_id,
+            DuplicateFile.id.in_(kept_ids),
+        )
+    )
+    kept_files = {f.id: f for f in result.scalars().all()}
+
+    # Extract directory prefixes from kept files
+    import os
+    prefix_counts: dict[str, int] = {}
+    for decision in body.decisions:
+        f = kept_files.get(decision.kept_file_id)
+        if not f:
+            continue
+        parent = os.path.dirname(f.path)
+        parts = parent.split("/")
+        for i in range(2, len(parts) + 1):
+            prefix = "/".join(parts[:i])
+            prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+
+    if not prefix_counts:
+        return SuggestKeepersResponse(suggestions=[], pattern=None)
+
+    # Find the most specific prefix that matches most decisions
+    total = len(body.decisions)
+    best_prefix = ""
+    best_score = 0.0
+    for prefix, count in prefix_counts.items():
+        score = (count / total) * len(prefix)
+        if count >= 2 and score > best_score:
+            best_prefix = prefix
+            best_score = score
+
+    if not best_prefix:
+        return SuggestKeepersResponse(suggestions=[], pattern=None)
+
+    match_count = prefix_counts[best_prefix]
+    confidence = match_count / total
+
+    # Find unresolved groups and suggest keepers
+    decided_checksums = {d.group_checksum for d in body.decisions}
+
+    groups_q = (
+        select(
+            DuplicateFile.checksum,
+            func.count().label("cnt"),
+        )
+        .where(DuplicateFile.scan_id == scan_id)
+        .group_by(DuplicateFile.checksum)
+        .having(func.count() > 1)
+    )
+    groups_result = await db.execute(groups_q)
+    all_checksums = {row.checksum for row in groups_result}
+    undecided = all_checksums - decided_checksums
+
+    if not undecided:
+        return SuggestKeepersResponse(
+            suggestions=[],
+            pattern={
+                "preferred_prefix": best_prefix,
+                "match_count": match_count,
+                "total_decisions": total,
+            },
+        )
+
+    # Fetch files for undecided groups
+    files_q = select(DuplicateFile).where(
+        DuplicateFile.scan_id == scan_id,
+        DuplicateFile.checksum.in_(undecided),
+    )
+    files_result = await db.execute(files_q)
+    files_by_checksum: dict[str, list] = {}
+    for f in files_result.scalars().all():
+        files_by_checksum.setdefault(f.checksum, []).append(f)
+
+    # For each undecided group, see if exactly one file matches the pattern
+    suggestions = []
+    for checksum, files in files_by_checksum.items():
+        matching = [f for f in files if f.path.startswith(best_prefix + "/")]
+        if len(matching) == 1:
+            suggestions.append(SuggestedKeeperItem(
+                group_checksum=checksum,
+                suggested_file_id=matching[0].id,
+                confidence=confidence,
+                reason=f"Path matches pattern: {best_prefix}/",
+            ))
+
+    return SuggestKeepersResponse(
+        suggestions=suggestions,
+        pattern={
+            "preferred_prefix": best_prefix,
+            "match_count": match_count,
+            "total_decisions": total,
+        },
+    )

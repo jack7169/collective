@@ -22,8 +22,6 @@ import { StatsCards } from "@/components/results/StatsCards";
 import { SpaceChart } from "@/components/results/SpaceChart";
 import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
 import { SimilarDirectoriesTab } from "@/components/results/SimilarDirectoriesTab";
-import { ActionQueuePanel } from "@/components/common/ActionQueuePanel";
-import { useActionQueue } from "@/hooks/useActionQueue";
 import { formatDate } from "@/lib/format";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
@@ -46,8 +44,6 @@ export function ScanResults() {
   const saveFromScan = useSaveFromScan();
   const resumeScan = useResumeScan();
   const [showDelete, setShowDelete] = useState(false);
-
-  const actionQueue = useActionQueue();
 
   if (scanLoading) {
     return (
@@ -213,12 +209,7 @@ export function ScanResults() {
 
         {/* Duplicate Groups (Czkawka-style) */}
         <TabsContent value="groups">
-          {id && (
-            <DuplicateGroupsList
-              scanId={id}
-              addAction={actionQueue.addAction}
-            />
-          )}
+          {id && <DuplicateGroupsList scanId={id} />}
         </TabsContent>
 
         {/* Similar Directories */}
@@ -226,18 +217,6 @@ export function ScanResults() {
           {id && <SimilarDirectoriesTab scanId={id} />}
         </TabsContent>
       </Tabs>
-
-      {/* Action Queue Panel */}
-      <ActionQueuePanel
-        queue={actionQueue.queue}
-        onRemove={actionQueue.removeAction}
-        onReorder={actionQueue.reorderAction}
-        onClear={actionQueue.clearQueue}
-        onExecute={actionQueue.executeQueue}
-        isExecuting={actionQueue.isExecuting}
-        lastResult={actionQueue.lastResult}
-        totalEstimatedSize={actionQueue.totalEstimatedSize}
-      />
 
       <ConfirmDialog
         open={showDelete}

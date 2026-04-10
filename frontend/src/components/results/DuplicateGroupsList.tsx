@@ -1,16 +1,10 @@
-import { useState } from "react";
-import {
-  Trash2,
-  Link,
-  Link2,
-  ChevronDown,
-  Files,
-  Layers,
-} from "lucide-react";
+import { useState, useCallback } from "react";
+import { Layers, Loader2, Sparkles } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDuplicateGroups } from "@/api/results";
-import { useGroupSelection } from "@/hooks/useGroupSelection";
+import { post } from "@/api/client";
+import { useKeeperSelection } from "@/hooks/useKeeperSelection";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -18,65 +12,112 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { DuplicateGroupCard } from "./DuplicateGroupCard";
+import { ReviewApplyDialog } from "./ReviewApplyDialog";
 import { formatBytes, formatNumber } from "@/lib/format";
-import type { QueuedAction } from "@/hooks/useActionQueue";
-import type { DuplicateGroup } from "@/api/types";
 
 interface DuplicateGroupsListProps {
   scanId: string;
-  addAction: (action: Omit<QueuedAction, "id">) => void;
 }
 
-export function DuplicateGroupsList({
-  scanId,
-  addAction,
-}: DuplicateGroupsListProps) {
+interface SuggestKeepersResponse {
+  suggestions: Array<{
+    group_checksum: string;
+    suggested_file_id: number;
+    confidence: number;
+    reason: string;
+  }>;
+  pattern: {
+    preferred_prefix: string;
+    match_count: number;
+    total_decisions: number;
+  } | null;
+}
+
+export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("size");
+  const [showReview, setShowReview] = useState(false);
   const { data, isLoading } = useDuplicateGroups(scanId, page, 20, sortBy);
   const groups = data?.items ?? [];
+  const queryClient = useQueryClient();
 
-  const selection = useGroupSelection(groups);
+  const selection = useKeeperSelection(groups);
 
-  const handleBulkAction = (type: "delete" | "hardlink" | "symlink") => {
-    for (const file of selection.selectedFiles) {
-      if (type === "delete") {
-        addAction({
-          type: "delete",
-          sourcePath: file.path,
-          description: `Delete: ${file.path.split("/").pop()}`,
-          estimatedSize: file.size,
-        });
-      } else {
-        // Find the original in the same group
-        for (const group of groups) {
-          const original = group.files.find((f) => f.is_original);
-          if (original && group.files.some((f) => f.id === file.id)) {
-            addAction({
-              type,
-              sourcePath: file.path,
-              destPath: original.path,
-              description: `${type}: ${file.path.split("/").pop()} -> original`,
-              estimatedSize: file.size,
-            });
-            break;
-          }
+  const suggestMutation = useMutation({
+    mutationFn: (
+      decisions: Array<{ group_checksum: string; kept_file_id: number }>
+    ) =>
+      post<SuggestKeepersResponse>(`/scans/${scanId}/suggest-keepers`, {
+        decisions,
+      }),
+    onSuccess: (data) => {
+      selection.updateSuggestions(
+        data.suggestions.map((s) => ({
+          groupChecksum: s.group_checksum,
+          suggestedFileId: s.suggested_file_id,
+          confidence: s.confidence,
+          reason: s.reason,
+        }))
+      );
+    },
+  });
+
+  const handleSetKeeper = useCallback(
+    (checksum: string, fileId: number) => {
+      selection.setKeeper(checksum, fileId);
+
+      const allDecisions: Array<{
+        group_checksum: string;
+        kept_file_id: number;
+      }> = [];
+      for (const group of groups) {
+        const existing = selection.keepers.get(group.checksum);
+        if (existing != null) {
+          allDecisions.push({
+            group_checksum: group.checksum,
+            kept_file_id: existing,
+          });
         }
       }
-    }
-    selection.clearSelection();
+      if (!allDecisions.some((d) => d.group_checksum === checksum)) {
+        allDecisions.push({ group_checksum: checksum, kept_file_id: fileId });
+      }
+
+      if (allDecisions.length >= 3) {
+        suggestMutation.mutate(allDecisions);
+      }
+    },
+    [groups, selection, suggestMutation]
+  );
+
+  const executeMutation = useMutation({
+    mutationFn: async () => {
+      for (const decision of selection.decisions) {
+        for (const path of decision.deletePaths) {
+          const action = await post<{ id: number }>("/actions", {
+            scan_id: Number(scanId),
+            action_type: "delete",
+            source_path: path,
+            notes: `Keep: ${decision.keeperPath}`,
+          });
+          await post(`/actions/${action.id}/confirm`, {});
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scans", scanId] });
+    },
+  });
+
+  const handleApply = async () => {
+    await executeMutation.mutateAsync();
   };
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
         Loading duplicate groups...
       </div>
     );
@@ -86,9 +127,7 @@ export function DuplicateGroupsList({
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <Layers className="h-12 w-12 text-muted-foreground/50 mb-4" />
-        <p className="text-muted-foreground">
-          No duplicate file groups found
-        </p>
+        <p className="text-muted-foreground">No duplicate file groups found</p>
       </div>
     );
   }
@@ -98,7 +137,13 @@ export function DuplicateGroupsList({
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <Select value={sortBy} onValueChange={(v) => { setSortBy(v); setPage(1); }}>
+          <Select
+            value={sortBy}
+            onValueChange={(v) => {
+              setSortBy(v);
+              setPage(1);
+            }}
+          >
             <SelectTrigger className="w-36">
               <SelectValue />
             </SelectTrigger>
@@ -108,78 +153,62 @@ export function DuplicateGroupsList({
             </SelectContent>
           </Select>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <ChevronDown className="h-3.5 w-3.5 mr-1" />
-                Select
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => selection.selectAllDuplicates(groups)}>
-                Select all duplicates
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => selection.clearSelection()}>
-                Clear all
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <span className="text-sm text-muted-foreground">
+            {selection.resolvedCount} of {formatNumber(data.total)} groups
+            resolved
+            {selection.totalReclaimable > 0 && (
+              <>
+                {" · "}
+                <span className="text-destructive font-medium">
+                  {formatBytes(selection.totalReclaimable)} reclaimable
+                </span>
+              </>
+            )}
+          </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          {selection.selectedCount > 0 && (
-            <>
-              <Badge variant="secondary" className="text-xs">
-                {formatNumber(selection.selectedCount)} files ({formatBytes(selection.selectedTotalSize)})
-              </Badge>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() => handleBulkAction("delete")}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleBulkAction("hardlink")}
-              >
-                <Link className="h-3.5 w-3.5" />
-                Hardlink
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleBulkAction("symlink")}
-              >
-                <Link2 className="h-3.5 w-3.5" />
-                Symlink
-              </Button>
-            </>
+        <div className="flex items-center gap-2">
+          {selection.unresolvedSuggestionCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={selection.acceptAllSuggestions}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Accept All Suggestions ({selection.unresolvedSuggestionCount})
+            </Button>
           )}
+          <Button
+            size="sm"
+            disabled={selection.resolvedCount === 0}
+            onClick={() => setShowReview(true)}
+          >
+            Review & Apply
+          </Button>
         </div>
       </div>
 
       {/* Group cards */}
-      {groups.map((group) => (
-        <DuplicateGroupCard
-          key={group.checksum}
-          group={group}
-          selected={selection.selected}
-          onToggle={selection.toggleFile}
-          onSelectAllDuplicates={selection.selectAllDuplicatesInGroup}
-          onSelectExceptOldest={selection.selectAllExceptOldest}
-          onSelectExceptNewest={selection.selectAllExceptNewest}
-          onClearGroup={selection.clearGroup}
-        />
-      ))}
+      <div className="flex flex-col gap-3">
+        {groups.map((group) => (
+          <DuplicateGroupCard
+            key={group.checksum}
+            group={group}
+            keeperFileId={selection.keepers.get(group.checksum)}
+            suggestion={selection.suggestions.get(group.checksum)}
+            onSetKeeper={handleSetKeeper}
+            onClearKeeper={selection.clearKeeper}
+            onAcceptSuggestion={selection.acceptSuggestion}
+          />
+        ))}
+      </div>
 
       {/* Pagination */}
       {data.pages > 1 && (
         <div className="flex items-center justify-between pt-4 border-t border-border">
           <span className="text-sm text-muted-foreground">
-            Page {data.page} of {data.pages} ({formatNumber(data.total)} groups)
+            Page {data.page} of {data.pages} (
+            {formatNumber(data.total)} groups)
           </span>
           <div className="flex gap-2">
             <Button
@@ -201,6 +230,16 @@ export function DuplicateGroupsList({
           </div>
         </div>
       )}
+
+      {/* Review dialog */}
+      <ReviewApplyDialog
+        open={showReview}
+        onOpenChange={setShowReview}
+        decisions={selection.decisions}
+        totalReclaimable={selection.totalReclaimable}
+        totalDeleteFiles={selection.totalDeleteFiles}
+        onApply={handleApply}
+      />
     </div>
   );
 }
