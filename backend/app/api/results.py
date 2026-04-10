@@ -7,7 +7,7 @@ from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.duplicate import DuplicateDirectory, DuplicateFile
+from app.models.duplicate import DuplicateFile
 from app.models.scan import Scan
 from app.models.similarity import DirectorySimilarity
 from app.schemas.common import PaginatedResponse
@@ -23,50 +23,6 @@ async def _get_scan_or_404(db: AsyncSession, scan_id: int) -> Scan:
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     return scan
-
-
-@router.get("/duplicate-dirs")
-async def list_duplicate_dirs(
-    scan_id: int,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=500),
-    db: AsyncSession = Depends(get_db),
-):
-    await _get_scan_or_404(db, scan_id)
-
-    count_q = select(func.count()).select_from(DuplicateDirectory).where(
-        DuplicateDirectory.scan_id == scan_id
-    )
-    total = (await db.execute(count_q)).scalar()
-
-    q = (
-        select(DuplicateDirectory)
-        .where(DuplicateDirectory.scan_id == scan_id)
-        .order_by(desc(DuplicateDirectory.total_size))
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
-    result = await db.execute(q)
-    dirs = result.scalars().all()
-
-    from pydantic import BaseModel, ConfigDict
-
-    class DuplicateDirectoryResponse(BaseModel):
-        model_config = ConfigDict(from_attributes=True)
-        id: int
-        scan_id: int
-        group_id: str
-        path: str
-        file_count: int
-        total_size: int
-        is_original: bool
-
-    return PaginatedResponse.create(
-        items=[DuplicateDirectoryResponse.model_validate(d) for d in dirs],
-        total=total,
-        page=page,
-        per_page=per_page,
-    )
 
 
 @router.get("/similar-dirs")

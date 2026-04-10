@@ -59,16 +59,6 @@ export interface ScanProgress {
   started_at: string | null;
 }
 
-export interface DuplicateDirectory {
-  id: number;
-  scan_id: number;
-  group_id: string;
-  path: string;
-  file_count: number;
-  total_size: number;
-  is_original: boolean;
-}
-
 export interface DuplicateFile {
   id: number;
   scan_id: number;
