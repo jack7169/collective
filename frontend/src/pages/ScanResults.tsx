@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
-  Files,
   FolderSync,
   HardDrive,
   BarChart3,
@@ -14,8 +13,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useScan, useScanStats, useDeleteScan, useSaveFromScan, useResumeScan } from "@/api/scans";
-import { useDuplicateDirs } from "@/api/results";
-import type { DuplicateDirectory } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -48,7 +45,6 @@ export function ScanResults() {
   const { data: scan, isLoading: scanLoading, isError: scanError } = useScan(id);
   const scanExists = !!scan;
   const { data: stats } = useScanStats(scanExists ? id : undefined);
-  const { data: dupDirsData } = useDuplicateDirs(scanExists ? id : undefined);
   const navigate = useNavigate();
   const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
@@ -168,7 +164,6 @@ export function ScanResults() {
             <Layers className="h-4 w-4 mr-1" />
             Duplicate Groups
           </TabsTrigger>
-          <TabsTrigger value="duplicates">Exact Duplicates</TabsTrigger>
           <TabsTrigger value="similar">Similar Directories</TabsTrigger>
         </TabsList>
 
@@ -239,69 +234,6 @@ export function ScanResults() {
               scanId={id}
               addAction={actionQueue.addAction}
             />
-          )}
-        </TabsContent>
-
-        {/* Exact Duplicates */}
-        <TabsContent value="duplicates">
-          {dupDirsData?.items && dupDirsData.items.length > 0 ? (
-            <div className="space-y-4">
-              {Object.entries(
-                dupDirsData.items.reduce<Record<string, DuplicateDirectory[]>>(
-                  (groups, dir) => {
-                    (groups[dir.group_id] ??= []).push(dir);
-                    return groups;
-                  },
-                  {}
-                )
-              ).map(([groupId, dirs]) => (
-                <Card key={groupId}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-mono">
-                        Group {groupId.slice(0, 12)}...
-                      </CardTitle>
-                      <Badge variant="outline">
-                        {formatBytes(dirs[0].total_size)} x {dirs.length} dirs
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-1">
-                      {dirs.map((dir) => (
-                        <div
-                          key={dir.path}
-                          className="flex items-center justify-between rounded px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors"
-                        >
-                          <span className="font-mono text-xs truncate max-w-[70%]">
-                            {dir.path}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {dir.is_original && (
-                              <Badge variant="success" className="text-xs">
-                                original
-                              </Badge>
-                            )}
-                            <span className="text-xs text-muted-foreground">
-                              {dir.file_count} files · {formatBytes(dir.total_size)}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Files className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground">
-                  No exact duplicate directories found
-                </p>
-              </CardContent>
-            </Card>
           )}
         </TabsContent>
 
