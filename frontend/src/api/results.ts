@@ -76,15 +76,17 @@ export function useCompare(
         `/compare?scan_id=${scanId}&dir_a=${encodeURIComponent(dirA!)}&dir_b=${encodeURIComponent(dirB!)}`
       ),
     enabled: !!scanId && !!dirA && !!dirB,
+    staleTime: Infinity,
   });
 }
 
-export function useTreeDiff(dirA: string | null, dirB: string | null) {
+export function useTreeDiff(dirA: string | null, dirB: string | null, enabled = true) {
   return useQuery({
     queryKey: ["tree-diff", dirA, dirB],
     queryFn: () =>
       post<TreeDiffResult>("/compare/tree-diff", { dir_a: dirA, dir_b: dirB }),
-    enabled: !!dirA && !!dirB,
+    enabled: !!dirA && !!dirB && enabled,
+    staleTime: Infinity,
   });
 }
 

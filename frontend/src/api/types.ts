@@ -178,6 +178,8 @@ export interface TreeDiffNode {
   size_b?: number;
   match?: "size_match" | "name_only";
   similarity?: number;
+  collapsed?: boolean;
+  child_count?: number;
   children?: TreeDiffNode[];
 }
 

@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+from functools import lru_cache
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -14,6 +16,9 @@ from app.models.duplicate import DuplicateFile
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/compare", tags=["compare"])
 
+# Server-side cache for comparison results (scan data is immutable after completion)
+_compare_cache: dict[str, Any] = {}
+
 
 @router.get("")
 async def compare_directories(
@@ -22,6 +27,10 @@ async def compare_directories(
     scan_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
+    cache_key = f"{scan_id}:{dir_a}:{dir_b}"
+    if cache_key in _compare_cache:
+        return _compare_cache[cache_key]
+
     q = select(DuplicateFile).where(
         DuplicateFile.scan_id == scan_id,
         (DuplicateFile.path.startswith(dir_a + "/"))
@@ -58,7 +67,6 @@ async def compare_directories(
             "checksum": f.checksum,
         }
 
-    # Build shared_files list matching frontend CompareFile type
     shared_files = []
     shared_size = 0
     for cksum in shared_checksums:
@@ -83,7 +91,7 @@ async def compare_directories(
             only_in_b.append(file_response(f))
             only_b_size += f.size
 
-    return {
+    response = {
         "dir_a": dir_a,
         "dir_b": dir_b,
         "shared_files": shared_files,
@@ -93,6 +101,9 @@ async def compare_directories(
         "only_a_size": only_a_size,
         "only_b_size": only_b_size,
     }
+
+    _compare_cache[cache_key] = response
+    return response
 
 
 class RsyncDryRunRequest(BaseModel):
@@ -240,13 +251,20 @@ class DirectoryTreeRequest(BaseModel):
     max_depth: int = 5
 
 
+_tree_cache: dict[str, Any] = {}
+
+
 @router.post("/tree-diff")
 async def tree_diff(body: DirectoryTreeRequest):
     """
     Compare two directory trees structurally — returns a unified tree
     showing which subdirectories and files exist in each side.
-    Integrates with filesystem browsing for navigation.
+    Folders where all children share the same status are collapsed by default.
     """
+    cache_key = f"{body.dir_a}:{body.dir_b}:{body.max_depth}"
+    if cache_key in _tree_cache:
+        return _tree_cache[cache_key]
+
     settings = get_settings()
     data_dir = os.path.realpath(settings.DATA_DIR)
 
@@ -286,6 +304,25 @@ async def tree_diff(body: DirectoryTreeRequest):
     tree_a = scan_tree(dir_a)
     tree_b = scan_tree(dir_b)
 
+    def get_uniform_status(children: list[dict]) -> str | None:
+        """If all children (recursively) share the same status, return it."""
+        if not children:
+            return None
+        statuses = set()
+        for child in children:
+            statuses.add(child.get("status", "both"))
+            # Check nested children too
+            nested = child.get("children")
+            if nested:
+                nested_status = get_uniform_status(nested)
+                if nested_status:
+                    statuses.add(nested_status)
+                else:
+                    return None  # Mixed nested children
+        if len(statuses) == 1:
+            return statuses.pop()
+        return None
+
     def diff_trees(a: dict, b: dict) -> list[dict]:
         all_names = sorted(set(list(a.keys()) + list(b.keys())))
         result = []
@@ -308,6 +345,11 @@ async def tree_diff(body: DirectoryTreeRequest):
                     total = len(node["children"]) if node["children"] else 1
                     both = sum(1 for c in node["children"] if c.get("status") == "both")
                     node["similarity"] = round(both / total * 100, 1) if total > 0 else 0
+                    # Smart collapse: if all children share uniform status, mark folder as collapsed
+                    uniform = get_uniform_status(node["children"])
+                    if uniform:
+                        node["collapsed"] = True
+                        node["child_count"] = total
                 else:
                     node["match"] = "name_only"
             elif in_a:
@@ -319,6 +361,8 @@ async def tree_diff(body: DirectoryTreeRequest):
                         {"name": k, "status": "only_a", "is_dir": v.get("is_dir", False), "size_a": v.get("size")}
                         for k, v in in_a["children"].items()
                     ]
+                    node["collapsed"] = True
+                    node["child_count"] = len(node["children"])
             else:
                 node["status"] = "only_b"
                 node["size_b"] = in_b.get("size")
@@ -328,13 +372,14 @@ async def tree_diff(body: DirectoryTreeRequest):
                         {"name": k, "status": "only_b", "is_dir": v.get("is_dir", False), "size_b": v.get("size")}
                         for k, v in in_b["children"].items()
                     ]
+                    node["collapsed"] = True
+                    node["child_count"] = len(node["children"])
 
             result.append(node)
         return result
 
     diff = diff_trees(tree_a, tree_b)
 
-    # Summary stats
     def count_status(nodes: list[dict]) -> dict:
         counts = {"both": 0, "only_a": 0, "only_b": 0}
         for n in nodes:
@@ -349,9 +394,12 @@ async def tree_diff(body: DirectoryTreeRequest):
 
     stats = count_status(diff)
 
-    return {
+    response = {
         "dir_a": body.dir_a,
         "dir_b": body.dir_b,
         "tree": diff,
         "stats": stats,
     }
+
+    _tree_cache[cache_key] = response
+    return response

@@ -51,6 +51,8 @@ interface ArboristNode {
   sizeA?: number;
   sizeB?: number;
   similarity?: number;
+  collapsed?: boolean;
+  childCount?: number;
   children?: ArboristNode[];
 }
 
@@ -66,7 +68,14 @@ function transformNodes(nodes: TreeDiffNode[], prefix = ""): ArboristNode[] {
       sizeA: node.size_a,
       sizeB: node.size_b,
       similarity: node.similarity,
-      children: node.children ? transformNodes(node.children, `${id}/`) : undefined,
+      collapsed: node.collapsed,
+      childCount: node.child_count,
+      // If collapsed by default, don't pass children so the tree node starts closed
+      children: node.children
+        ? node.collapsed
+          ? transformNodes(node.children, `${id}/`)
+          : transformNodes(node.children, `${id}/`)
+        : undefined,
     };
   });
 }
@@ -104,6 +113,11 @@ function TreeNode({ node, style }: NodeRendererProps<ArboristNode>) {
 
       <span className={cn("flex-1 truncate text-xs", statusText[data.status])}>
         {data.name}
+        {data.collapsed && data.childCount && (
+          <span className="text-[9px] text-muted-foreground ml-1">
+            ({data.childCount} items)
+          </span>
+        )}
       </span>
 
       {/* Size */}
@@ -139,7 +153,8 @@ export function DirectoryCompare() {
   const dirA = searchParams.get("a");
   const dirB = searchParams.get("b");
   const { data: compare, isLoading } = useCompare(id, dirA, dirB);
-  const { data: treeDiff } = useTreeDiff(dirA, dirB);
+  const [showTree, setShowTree] = useState(false);
+  const { data: treeDiff, isLoading: treeLoading } = useTreeDiff(dirA, dirB, showTree);
   const createAction = useCreateAction();
   const dryRun = useDryRun();
   const [showDryRunModal, setShowDryRunModal] = useState(false);
@@ -350,7 +365,7 @@ export function DirectoryCompare() {
                 {treeData.length > 0 ? (
                   <Tree
                     data={treeData}
-                    openByDefault={true}
+                    openByDefault={false}
                     width="100%"
                     height={500}
                     indent={20}
@@ -359,15 +374,30 @@ export function DirectoryCompare() {
                   >
                     {TreeNode}
                   </Tree>
-                ) : (
+                ) : showTree && treeLoading ? (
                   <div className="flex flex-col items-center justify-center py-12 gap-3">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">
-                      Loading directory tree...
+                      Scanning filesystem...
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Scanning filesystem — comparison data is shown above
+                      This may take a moment for large directories
                     </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 gap-3">
+                    <FolderTree className="h-8 w-8 text-muted-foreground/50" />
+                    <p className="text-sm text-muted-foreground">
+                      Filesystem tree comparison
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowTree(true)}
+                    >
+                      <FolderTree className="h-3.5 w-3.5" />
+                      Load Directory Tree
+                    </Button>
                   </div>
                 )}
               </ScrollArea>
