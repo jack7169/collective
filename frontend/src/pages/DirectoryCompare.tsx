@@ -153,8 +153,7 @@ export function DirectoryCompare() {
   const dirA = searchParams.get("a");
   const dirB = searchParams.get("b");
   const { data: compare, isLoading } = useCompare(id, dirA, dirB);
-  const [showTree, setShowTree] = useState(false);
-  const { data: treeDiff, isLoading: treeLoading } = useTreeDiff(dirA, dirB, showTree);
+  const { data: treeDiff, isLoading: treeLoading } = useTreeDiff(dirA, dirB);
   const createAction = useCreateAction();
   const dryRun = useDryRun();
   const [showDryRunModal, setShowDryRunModal] = useState(false);
@@ -374,30 +373,15 @@ export function DirectoryCompare() {
                   >
                     {TreeNode}
                   </Tree>
-                ) : showTree && treeLoading ? (
+                ) : (
                   <div className="flex flex-col items-center justify-center py-12 gap-3">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">
-                      Scanning filesystem...
+                      Loading directory tree...
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      This may take a moment for large directories
+                      Scanning filesystem — comparison data is shown above
                     </p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-12 gap-3">
-                    <FolderTree className="h-8 w-8 text-muted-foreground/50" />
-                    <p className="text-sm text-muted-foreground">
-                      Filesystem tree comparison
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowTree(true)}
-                    >
-                      <FolderTree className="h-3.5 w-3.5" />
-                      Load Directory Tree
-                    </Button>
                   </div>
                 )}
               </ScrollArea>

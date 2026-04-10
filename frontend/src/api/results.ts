@@ -80,12 +80,12 @@ export function useCompare(
   });
 }
 
-export function useTreeDiff(dirA: string | null, dirB: string | null, enabled = true) {
+export function useTreeDiff(dirA: string | null, dirB: string | null) {
   return useQuery({
     queryKey: ["tree-diff", dirA, dirB],
     queryFn: () =>
       post<TreeDiffResult>("/compare/tree-diff", { dir_a: dirA, dir_b: dirB }),
-    enabled: !!dirA && !!dirB && enabled,
+    enabled: !!dirA && !!dirB,
     staleTime: Infinity,
   });
 }
