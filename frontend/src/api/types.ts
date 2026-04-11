@@ -88,6 +88,7 @@ export interface DirectorySimilarity {
   unique_to_a: number;
   unique_to_b: number;
   relationship?: string | null;
+  is_rollup?: boolean;
 }
 
 export interface DirectorySimilarityFilters {

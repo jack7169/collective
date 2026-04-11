@@ -670,10 +670,103 @@ def _compute_similarities_sync(
         DirectorySimilarity(
             scan_id=scan_id,
             structural_similarity=None,
+            is_rollup=False,
             **r,
         )
         for r in all_results
     ]
+
+    # --- Pass 2: Detect sibling clusters and compute parent-level rollups ---
+    # Group leaf pairs by (parent_of_dir_a, parent_of_dir_b)
+    parent_clusters: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    existing_dirs = {(r["dir_a"], r["dir_b"]) for r in all_results}
+
+    for r in all_results:
+        pa = r["dir_a"].rsplit("/", 1)[0] if "/" in r["dir_a"] else ""
+        pb = r["dir_b"].rsplit("/", 1)[0] if "/" in r["dir_b"] else ""
+        if pa and pb and pa != pb:
+            key = (pa, pb) if pa <= pb else (pb, pa)
+            parent_clusters[key].append(r)
+
+    rollup_results = []
+    for (parent_a, parent_b), children in parent_clusters.items():
+        if len(children) < 3:
+            continue
+        # Skip if we already have a pair at this level
+        if (parent_a, parent_b) in existing_dirs or (parent_b, parent_a) in existing_dirs:
+            continue
+
+        # Compute true parent-level similarity from file data
+        checksums_a: set[str] = set()
+        checksums_b: set[str] = set()
+        size_a_total = 0
+        size_b_total = 0
+        sizes_by_checksum: dict[str, int] = {}
+
+        for path, checksum, size in rows:
+            parent = path.rsplit("/", 1)[0] if "/" in path else ""
+            if parent.startswith(parent_a + "/") or parent == parent_a:
+                checksums_a.add(checksum)
+                sizes_by_checksum[checksum] = size
+                size_a_total += size
+            elif parent.startswith(parent_b + "/") or parent == parent_b:
+                checksums_b.add(checksum)
+                sizes_by_checksum[checksum] = size
+                size_b_total += size
+
+        if not checksums_a or not checksums_b:
+            continue
+
+        shared = checksums_a & checksums_b
+        union = checksums_a | checksums_b
+        shared_count = len(shared)
+        union_count = len(union)
+
+        if not union_count:
+            continue
+
+        jaccard = (shared_count / union_count) * 100.0
+        if jaccard < threshold:
+            continue
+
+        count_a = len(checksums_a)
+        count_b = len(checksums_b)
+        a_sub = (shared_count / count_a) * 100.0 if count_a else 0.0
+        b_sub = (shared_count / count_b) * 100.0 if count_b else 0.0
+        shared_size = sum(sizes_by_checksum.get(c, 0) for c in shared)
+
+        if jaccard >= 99.0:
+            rel = "exact"
+        elif a_sub >= 95.0:
+            rel = "subset"
+        elif b_sub >= 95.0:
+            rel = "superset"
+        else:
+            rel = "overlap"
+
+        rollup_results.append({
+            "dir_a": parent_a, "dir_b": parent_b,
+            "files_a": count_a, "files_b": count_b,
+            "shared_files": shared_count, "shared_size": shared_size,
+            "size_a": size_a_total, "size_b": size_b_total,
+            "jaccard_similarity": round(jaccard, 2),
+            "a_subset_pct": round(a_sub, 2),
+            "b_subset_pct": round(b_sub, 2),
+            "unique_to_a": count_a - shared_count,
+            "unique_to_b": count_b - shared_count,
+            "relationship": rel,
+        })
+
+    if rollup_results:
+        logger.info("Pass 2: %d parent-level rollup pairs from %d sibling clusters",
+                    len(rollup_results), len([c for c in parent_clusters.values() if len(c) >= 3]))
+        for r in rollup_results:
+            records.append(DirectorySimilarity(
+                scan_id=scan_id,
+                structural_similarity=None,
+                is_rollup=True,
+                **r,
+            ))
 
     # Bulk insert similarities
     batch_size = 1000

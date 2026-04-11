@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    BigInteger, Column, Float, ForeignKey, Index, Integer,
+    BigInteger, Boolean, Column, Float, ForeignKey, Index, Integer,
     String, UniqueConstraint,
 )
 from app.database import Base
@@ -25,6 +25,7 @@ class DirectorySimilarity(Base):
     unique_to_a = Column(Integer, nullable=False)
     unique_to_b = Column(Integer, nullable=False)
     relationship = Column(String, nullable=True)
+    is_rollup = Column(Boolean, default=False, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("scan_id", "dir_a", "dir_b", name="uq_similarity_scan_dirs"),

@@ -23,6 +23,7 @@ class DirectorySimilarityResponse(BaseModel):
     unique_to_a: int
     unique_to_b: int
     relationship: Optional[str] = None
+    is_rollup: bool = False
 
 
 class DirectorySimilarityFilters(BaseModel):

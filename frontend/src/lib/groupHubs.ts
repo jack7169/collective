@@ -78,7 +78,19 @@ export function buildAdjacency(
 export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
   if (!pairs.length) return [];
 
-  const adjacency = buildAdjacency(pairs);
+  // Filter: prefer rollup pairs, suppress leaf pairs covered by a rollup
+  const rollups = pairs.filter((p) => p.is_rollup);
+  const filteredPairs = pairs.filter((pair) => {
+    if (pair.is_rollup) return true;
+    // Suppress this leaf if a rollup covers it
+    return !rollups.some(
+      (r) =>
+        (pair.dir_a.startsWith(r.dir_a + "/") && pair.dir_b.startsWith(r.dir_b + "/")) ||
+        (pair.dir_a.startsWith(r.dir_b + "/") && pair.dir_b.startsWith(r.dir_a + "/"))
+    );
+  });
+
+  const adjacency = buildAdjacency(filteredPairs);
 
   // Score each directory by total reclaimable
   const scores = new Map<string, number>();

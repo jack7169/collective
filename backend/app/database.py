@@ -119,9 +119,19 @@ async def init_db():
                 except Exception:
                     pass
 
+            await conn.execute(text(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '1')"
+            ))
+
+        if current_version < 2:
+            # v2: Add is_rollup column for parent-level directory rollup
             try:
                 await conn.execute(text(
-                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '1')"
+                    "ALTER TABLE directory_similarities ADD COLUMN is_rollup BOOLEAN DEFAULT 0"
                 ))
             except Exception:
                 pass
+
+            await conn.execute(text(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')"
+            ))
