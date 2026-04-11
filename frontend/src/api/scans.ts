@@ -81,8 +81,9 @@ export function useReanalyze() {
       similarity_threshold?: number;
       scan_depth?: number;
     }) => post<Scan>(`/scans/${id}/reanalyze`, { similarity_threshold, scan_depth }),
-    onSuccess: (_data, { id }) => {
-      queryClient.invalidateQueries({ queryKey: ["scans", id] });
+    onSuccess: (data, { id }) => {
+      // Replace cached scan data immediately so UI shows "analyzing" status
+      queryClient.setQueryData(["scans", id], data);
       queryClient.invalidateQueries({ queryKey: ["scans"] });
     },
   });

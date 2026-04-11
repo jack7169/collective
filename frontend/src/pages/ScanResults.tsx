@@ -120,8 +120,9 @@ export function ScanResults() {
               variant="outline"
               onClick={() => {
                 if (id) {
-                  reanalyze.mutate({ id });
-                  navigate(`/scans/${id}/progress`);
+                  reanalyze.mutate({ id }, {
+                    onSuccess: () => navigate(`/scans/${id}/progress`),
+                  });
                 }
               }}
               disabled={reanalyze.isPending}
