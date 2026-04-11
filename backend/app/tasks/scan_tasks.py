@@ -73,17 +73,25 @@ def run_scan_task(scan_id: int):
         if not scan.accumulated_seconds:
             scan.accumulated_seconds = 0
 
-        if not skip_scanner:
-            # Update status to running
+        # Update status immediately so the UI reflects that work has started
+        if skip_scanner and skip_parsing:
+            scan.status = "analyzing"
+            scan.progress_percent = 80.0
+            scan.progress_message = "Resuming similarity analysis..."
+        elif skip_scanner:
+            scan.status = "parsing"
+            scan.progress_percent = 50.0
+            scan.progress_message = "Resuming — re-parsing scanner output..."
+        else:
             scan.status = "running"
-            if not scan.started_at:
-                scan.started_at = datetime.now(timezone.utc)
             if not resume_phase:
                 scan.progress_percent = 0.0
                 scan.progress_message = "Starting scan..."
             else:
                 scan.progress_message = "Resuming scan — cached file hashes make steps 1-5 near-instant..."
-            session.commit()
+        if not scan.started_at:
+            scan.started_at = datetime.now(timezone.utc)
+        session.commit()
 
         # Select scanner backend with auto-fallback
         import shutil
