@@ -112,9 +112,8 @@ export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
   const claimed = new Set<string>();
   const hubs: DirectoryHub[] = [];
 
-  function isClaimed(dir: string): boolean {
+  function isSubdirOfClaimed(dir: string): boolean {
     if (claimed.has(dir)) return true;
-    // Check if dir is a subdirectory of any claimed path, or vice versa
     const dirSlash = dir + "/";
     for (const c of claimed) {
       if (dirSlash.startsWith(c + "/") || (c + "/").startsWith(dirSlash)) {
@@ -125,7 +124,13 @@ export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
   }
 
   for (const dir of sorted) {
-    if (isClaimed(dir)) continue;
+    if (isSubdirOfClaimed(dir)) continue;
+
+    // Also check if this dir's peers are subdirectories of already-claimed paths.
+    // If most peers are already covered by an existing hub, this hub is redundant.
+    const dirPeers = adjacency.get(dir)!;
+    const coveredPeers = dirPeers.filter((p) => isSubdirOfClaimed(p.directory));
+    if (coveredPeers.length > 0 && coveredPeers.length >= dirPeers.length * 0.5) continue;
 
     const peers = adjacency.get(dir)!;
     const firstPeer = peers[0];
