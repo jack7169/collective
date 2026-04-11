@@ -413,16 +413,6 @@ def run_scan_task(scan_id: int):
             except Exception as e:
                 logger.warning("Failed to auto-save scan %d: %s", scan_id, e)
 
-        # Clean up output file and fclones cache dir
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
-        cache_dir = output_path.rsplit(".", 1)[0] + "_cache"
-        if os.path.isdir(cache_dir):
-            import shutil
-            shutil.rmtree(cache_dir, ignore_errors=True)
-
         logger.info("Scan %d completed successfully", scan_id)
 
     except Exception as e:
@@ -437,6 +427,18 @@ def run_scan_task(scan_id: int):
         except Exception:
             logger.exception("Failed to update scan status after error")
     finally:
+        # Clean up output file and ALL fclones cache dirs (runs on success, failure, and cancel)
+        import glob
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+        base = output_path.rsplit(".", 1)[0]
+        for cache_dir in glob.glob(f"{base}*cache*"):
+            if os.path.isdir(cache_dir):
+                import shutil
+                shutil.rmtree(cache_dir, ignore_errors=True)
+                logger.info("Cleaned up cache dir: %s", cache_dir)
         session.close()
 
 
