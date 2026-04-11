@@ -428,6 +428,7 @@ def run_scan_task(scan_id: int):
             scan_id,
             threshold=scan.similarity_threshold or 50.0,
             depth=scan.scan_depth,
+            target_paths=scan.target_paths,
         )
 
         # Complete
@@ -518,6 +519,7 @@ def run_reanalysis_task(scan_id: int):
             scan_id,
             threshold=scan.similarity_threshold or 50.0,
             depth=scan.scan_depth,
+            target_paths=scan.target_paths,
         )
 
         scan.status = "completed"
@@ -545,6 +547,7 @@ def _compute_similarities_sync(
     scan_id: int,
     threshold: float,
     depth: int | None,
+    target_paths: list[str] | None = None,
 ) -> int:
     """Synchronous version of similarity computation for Huey worker."""
     from collections import defaultdict
@@ -564,12 +567,21 @@ def _compute_similarities_sync(
     dir_sizes: dict[str, dict[str, int]] = defaultdict(dict)
     dir_total_size: dict[str, int] = defaultdict(int)
 
+    # Compute absolute depth from scan target paths so depth is relative to scan roots.
+    # E.g. target_paths=["/mnt/user/X/Y"] has prefix_depth=4, so scan_depth=5 means
+    # compare directories up to 5 levels BELOW the scan root (absolute depth = 4+5 = 9).
+    prefix_depth = 0
+    if target_paths and depth is not None and depth > 0:
+        min_depth = min(len(p.rstrip("/").split("/")) for p in target_paths)
+        prefix_depth = min_depth
+    abs_depth = (prefix_depth + depth) if depth is not None and depth > 0 else None
+
     for path, checksum, size in rows:
         parent = path.rsplit("/", 1)[0] if "/" in path else ""
-        if depth is not None and depth > 0:
+        if abs_depth is not None:
             parts = parent.rstrip("/").split("/")
-            if len(parts) > depth + 1:
-                parent = "/".join(parts[:depth + 1])
+            if len(parts) > abs_depth:
+                parent = "/".join(parts[:abs_depth])
 
         dir_checksums[parent].add(checksum)
         dir_sizes[parent][checksum] = size
