@@ -38,7 +38,7 @@ backend/
     services/    # Business logic (action_service, btrfs_service)
     tasks/       # Huey background tasks (scan_tasks, action_tasks, scheduler, worker)
     config.py    # Settings via pydantic-settings (env prefix: COLLECTIVE_)
-    database.py  # SQLAlchemy async setup
+    database.py  # SQLAlchemy async + sync engines, shared session factories
     main.py      # FastAPI app initialization
   tests/         # pytest tests
   alembic/       # Database migrations
@@ -53,7 +53,9 @@ frontend/
 ```
 
 ## Conventions
-- Backend uses async SQLAlchemy with SQLite
+- Backend uses async SQLAlchemy with SQLite (WAL mode, synchronous=NORMAL)
+- Two SQLAlchemy engines in database.py: async (API server) + sync (Huey workers/scheduler)
+- All task files use `get_sync_session()` from database.py — never create their own engines
 - Frontend uses TanStack React Query for server state
 - UI components follow shadcn/Radix patterns in components/ui/
 - Tailwind CSS with dark theme (custom variables in index.css)
@@ -71,6 +73,10 @@ frontend/
 - Duplicate Groups use "Pick the Keeper" sandbox model (useKeeperSelection hook)
 - Similar Directories use card-based layout with inline tagging (DirectoryPairCard)
 - Smart suggestions via POST /api/scans/{id}/suggest-keepers (path pattern detection)
-- Compare view uses server-side caching (_compare_cache, _tree_cache) for instant revisits
+- Compare view uses LRU-cached results (_compare_cache, _tree_cache) for instant revisits
 - ScanResults tab state persisted in URL via ?tab= search param
 - Tree-diff auto-collapses uniform-status folders for cleaner display
+- SQLite pragmas: WAL, busy_timeout=60s, synchronous=NORMAL, cache_size=64MB, temp_store=MEMORY
+- Schema versioning via `schema_version` key in settings table (init_db runs migrations once)
+- Batch deletion for large tables (50k rows per batch to avoid SQLite lock contention)
+- tag_originals uses single SQL UPDATE instead of per-checksum loop

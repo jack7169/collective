@@ -102,6 +102,8 @@ Frontend (React 19 + TypeScript + Vite + Tailwind)
   |
 Backend (FastAPI + SQLAlchemy + SQLite)
   |
+  |-- Async engine (API server)
+  |-- Shared sync engine (Huey workers + scheduler)
   |-- Scanners (fclones, rmlint)
   |-- Task Queue (Huey)
   |-- Scheduler (automatic scans)
@@ -109,11 +111,22 @@ Backend (FastAPI + SQLAlchemy + SQLite)
 Docker (supervisord: fastapi + huey + scheduler)
 ```
 
+### Database
+
+SQLite with WAL mode, optimized for concurrent read/write access across the API server, background task workers, and scheduler:
+
+- **Two engines** — async (API) and shared sync (workers/scheduler) with unified pragmas
+- **WAL + busy_timeout** — 60-second lock retry, `synchronous=NORMAL` for performance
+- **Indexed foreign keys** — `scan_id` indexes on all child tables for fast cascade deletes
+- **Batch operations** — large deletes (1M+ rows) processed in 50k batches to avoid lock contention
+- **LRU-cached** comparison results for instant revisits
+- **Versioned schema** — migrations tracked via `schema_version` in settings table
+
 ## Tech Stack
 
 **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query
 
-**Backend**: FastAPI, SQLAlchemy 2.0 (async), Alembic, Huey, SQLite
+**Backend**: FastAPI, SQLAlchemy 2.0 (async + sync), Huey, SQLite (WAL)
 
 **Scanners**: fclones (Rust, multi-threaded), rmlint (C, Merkle trees)
 
