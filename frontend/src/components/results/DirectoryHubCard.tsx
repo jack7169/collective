@@ -140,7 +140,7 @@ export function DirectoryHubCard({
           return (
             <div
               key={peer.directory}
-              className="border-b border-border last:border-b-0"
+              className="group/peer border-b border-border last:border-b-0"
             >
               {/* Main peer row */}
               <div
@@ -193,7 +193,7 @@ export function DirectoryHubCard({
 
               {/* Exploded network */}
               {peerExploded.length > 0 && (
-                <div className="px-5 pb-3" onClick={(e) => e.stopPropagation()}>
+                <div className={cn("px-5 pb-3 transition-opacity", isExpanded ? "opacity-100" : "opacity-0 group-hover/peer:opacity-100")} onClick={(e) => e.stopPropagation()}>
                   <button
                     className="flex items-center gap-2 text-xs text-primary hover:text-primary/80"
                     onClick={() => toggleExploded(peer.directory)}

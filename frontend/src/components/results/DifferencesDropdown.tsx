@@ -223,7 +223,7 @@ export function DifferencesDropdown({
 
   if (!hasAnyDifferences) {
     return (
-      <div className="px-4 py-2 border-t border-border text-[11px] text-muted-foreground flex items-center gap-2">
+      <div className="px-4 py-2 border-t border-border text-[11px] text-muted-foreground flex items-center gap-2 opacity-0 group-hover/peer:opacity-100 transition-opacity">
         <CheckCircle className="h-3.5 w-3.5 text-success" />
         Identical — no unique files on either side
       </div>
