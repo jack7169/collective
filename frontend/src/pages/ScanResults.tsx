@@ -6,9 +6,10 @@ import {
   BookmarkCheck,
   Layers,
   RotateCcw,
+  RefreshCw,
   AlertTriangle,
 } from "lucide-react";
-import { useScan, useScanStats, useSaveFromScan, useResumeScan } from "@/api/scans";
+import { useScan, useScanStats, useSaveFromScan, useResumeScan, useReanalyze } from "@/api/scans";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -44,6 +45,7 @@ export function ScanResults() {
   const activeTab = searchParams.get("tab") ?? "overview";
   const saveFromScan = useSaveFromScan();
   const resumeScan = useResumeScan();
+  const reanalyze = useReanalyze();
   const [showDelete, setShowDelete] = useState(false);
 
   if (scanLoading) {
@@ -112,6 +114,21 @@ export function ScanResults() {
               <BookmarkCheck className="h-3.5 w-3.5" />
               Saved
             </Badge>
+          )}
+          {scan.status === "completed" && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (id) {
+                  reanalyze.mutate({ id });
+                  navigate(`/scans/${id}/progress`);
+                }
+              }}
+              disabled={reanalyze.isPending}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {reanalyze.isPending ? "Re-analyzing..." : "Re-analyze"}
+            </Button>
           )}
           <Button
             variant="ghost"

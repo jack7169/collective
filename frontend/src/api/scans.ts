@@ -73,6 +73,21 @@ export function useResumeScan() {
   });
 }
 
+export function useReanalyze() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, similarity_threshold, scan_depth }: {
+      id: string;
+      similarity_threshold?: number;
+      scan_depth?: number;
+    }) => post<Scan>(`/scans/${id}/reanalyze`, { similarity_threshold, scan_depth }),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["scans", id] });
+      queryClient.invalidateQueries({ queryKey: ["scans"] });
+    },
+  });
+}
+
 export function useScanStats(id: string | undefined) {
   return useQuery({
     queryKey: ["scans", id, "stats"],
