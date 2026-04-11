@@ -29,10 +29,11 @@ import { DirectoryPairCard } from "@/components/results/DirectoryPairCard";
 import { TagFloatingBar } from "@/components/results/TagFloatingBar";
 import { formatNumber } from "@/lib/format";
 
-type SortField = "similarity" | "size" | "files";
+type SortField = "impact" | "similarity" | "size" | "files";
 type SortOrder = "asc" | "desc";
 
 const sortFieldToApi: Record<SortField, string> = {
+  impact: "impact",
   similarity: "jaccard_similarity",
   size: "shared_size",
   files: "shared_files",
@@ -44,7 +45,7 @@ interface SimilarDirectoriesTabProps {
 
 export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
   const [minSimilarity, setMinSimilarity] = useState(30);
-  const [sortBy, setSortBy] = useState<SortField>("size");
+  const [sortBy, setSortBy] = useState<SortField>("impact");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [relationship, setRelationship] = useState<string>("all");
   const [page, setPage] = useState(1);
@@ -142,6 +143,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="impact">Impact</SelectItem>
                   <SelectItem value="similarity">Similarity</SelectItem>
                   <SelectItem value="size">Shared Size</SelectItem>
                   <SelectItem value="files">File Count</SelectItem>

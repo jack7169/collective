@@ -54,14 +54,17 @@ async def list_similar_dirs(
     count_q = select(func.count()).select_from(DirectorySimilarity).where(*base_filter)
     total = (await db.execute(count_q)).scalar()
 
+    # "impact" = shared_size × (jaccard/100) — surfaces large clusters of overlap
+    impact_expr = DirectorySimilarity.shared_size * DirectorySimilarity.jaccard_similarity / 100.0
     allowed_sort_cols = {
+        "impact": impact_expr,
         "shared_size": DirectorySimilarity.shared_size,
         "jaccard_similarity": DirectorySimilarity.jaccard_similarity,
         "structural_similarity": DirectorySimilarity.structural_similarity,
         "shared_files": DirectorySimilarity.shared_files,
         "dir_a": DirectorySimilarity.dir_a,
     }
-    sort_col = allowed_sort_cols.get(sort_by, DirectorySimilarity.shared_size)
+    sort_col = allowed_sort_cols.get(sort_by, impact_expr)
     order = desc(sort_col) if sort_order == "desc" else sort_col.asc()
 
     q = (
