@@ -80,12 +80,24 @@ async def _recover_orphaned_tasks():
         logger.info("Recovered %d orphaned tasks on startup", total)
 
 
+def _cleanup_stale_cache_dirs():
+    """Remove leftover fclones/rmlint cache dirs from interrupted scans."""
+    import glob
+    import shutil
+    config_dir = settings.CONFIG_DIR
+    for cache_dir in glob.glob(os.path.join(config_dir, "scan_*cache*")):
+        if os.path.isdir(cache_dir):
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            logger.info("Cleaned stale cache dir on startup: %s", cache_dir)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Collective backend...")
     os.makedirs(settings.CONFIG_DIR, exist_ok=True)
     await init_db()
     logger.info("Database initialized")
+    _cleanup_stale_cache_dirs()
     await _recover_orphaned_tasks()
     yield
     logger.info("Shutting down Collective backend...")

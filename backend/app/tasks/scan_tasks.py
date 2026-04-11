@@ -131,8 +131,16 @@ def run_scan_task(scan_id: int):
             fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
             # Use a per-scan cache dir so fclones doesn't contend
-            # on the shared hash database lock
+            # on the shared hash database lock.
+            # Pre-clean any stale cache from a previous interrupted run
+            # to avoid "could not acquire lock" errors.
+            import glob, shutil
             scan_cache_dir = output_path.rsplit(".", 1)[0] + "_cache"
+            base = output_path.rsplit(".", 1)[0]
+            for stale in glob.glob(f"{base}*cache*"):
+                if os.path.isdir(stale):
+                    shutil.rmtree(stale, ignore_errors=True)
+                    logger.info("Pre-cleaned stale cache: %s", stale)
             os.makedirs(scan_cache_dir, exist_ok=True)
             scan_env = {**os.environ, "XDG_CACHE_HOME": scan_cache_dir}
 
