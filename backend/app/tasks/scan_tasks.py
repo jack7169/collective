@@ -536,100 +536,80 @@ def _compute_similarities_sync(
         dir_sizes[parent][checksum] = size
         dir_total_size[parent] += size
 
-    # Build inverted index
+    # Build inverted index: checksum → set of directories containing it
     checksum_to_dirs: dict[str, set[str]] = defaultdict(set)
     for dir_path, checksums in dir_checksums.items():
         for cksum in checksums:
             checksum_to_dirs[cksum].add(dir_path)
 
-    # Find candidate pairs
-    candidate_pairs: set[tuple[str, str]] = set()
+    # Count shared checksums per directory pair using the inverted index.
+    # For each checksum, increment the overlap counter for every pair of
+    # directories that share it. Uses a hash map instead of O(N²) pair
+    # enumeration — only pairs with actual overlap get entries.
+    # Skip checksums shared by too many directories (>50) to avoid
+    # combinatorial explosion on common files.
+    pair_shared_count: dict[tuple[str, str], int] = defaultdict(int)
+    pair_shared_size: dict[tuple[str, str], int] = defaultdict(int)
+
     for cksum, dirs in checksum_to_dirs.items():
+        if len(dirs) < 2 or len(dirs) > 50:
+            continue
         dirs_list = sorted(dirs)
+        # Get representative size for this checksum
+        cksum_size = 0
+        for d in dirs_list:
+            s = dir_sizes.get(d, {}).get(cksum, 0)
+            if s:
+                cksum_size = s
+                break
         for i in range(len(dirs_list)):
             for j in range(i + 1, len(dirs_list)):
-                candidate_pairs.add((dirs_list[i], dirs_list[j]))
+                pair = (dirs_list[i], dirs_list[j])
+                pair_shared_count[pair] += 1
+                pair_shared_size[pair] += cksum_size
 
-    # Compute similarities — parallelized across CPU cores
-    from concurrent.futures import ProcessPoolExecutor, as_completed
-    import multiprocessing
+    logger.info("Found %d candidate pairs with shared checksums across %d directories",
+                len(pair_shared_count), len(dir_checksums))
 
-    # Prepare serializable data for worker processes
-    pairs_list = list(candidate_pairs)
-    logger.info("Computing similarities for %d candidate pairs across %d directories",
-                len(pairs_list), len(dir_checksums))
-
-    # Convert sets to frozensets for pickling
-    dir_checksums_serial = {k: set(v) for k, v in dir_checksums.items()}
-    dir_sizes_serial = dict(dir_sizes)
-    dir_total_size_serial = dict(dir_total_size)
-
-    def compute_batch(batch):
-        """Compute similarities for a batch of pairs. Runs in worker process."""
-        results = []
-        for dir_a, dir_b in batch:
-            checksums_a = dir_checksums_serial.get(dir_a, set())
-            checksums_b = dir_checksums_serial.get(dir_b, set())
-
-            shared = checksums_a & checksums_b
-            union = checksums_a | checksums_b
-            if not union:
-                continue
-
-            shared_count = len(shared)
-            jaccard = (shared_count / len(union)) * 100.0
-            if jaccard < threshold:
-                continue
-
-            a_subset_pct = (shared_count / len(checksums_a)) * 100.0 if checksums_a else 0.0
-            b_subset_pct = (shared_count / len(checksums_b)) * 100.0 if checksums_b else 0.0
-
-            sizes_a = dir_sizes_serial.get(dir_a, {})
-            sizes_b = dir_sizes_serial.get(dir_b, {})
-            shared_size = sum(sizes_a.get(cksum, sizes_b.get(cksum, 0)) for cksum in shared)
-
-            if jaccard >= 99.0:
-                relationship = "exact"
-            elif a_subset_pct >= 95.0:
-                relationship = "subset"
-            elif b_subset_pct >= 95.0:
-                relationship = "superset"
-            else:
-                relationship = "overlap"
-
-            results.append({
-                "dir_a": dir_a, "dir_b": dir_b,
-                "files_a": len(checksums_a), "files_b": len(checksums_b),
-                "shared_files": shared_count, "shared_size": shared_size,
-                "size_a": dir_total_size_serial.get(dir_a, 0),
-                "size_b": dir_total_size_serial.get(dir_b, 0),
-                "jaccard_similarity": round(jaccard, 2),
-                "a_subset_pct": round(a_subset_pct, 2),
-                "b_subset_pct": round(b_subset_pct, 2),
-                "unique_to_a": len(checksums_a - checksums_b),
-                "unique_to_b": len(checksums_b - checksums_a),
-                "relationship": relationship,
-            })
-        return results
-
-    # Split into batches and process in parallel
-    num_workers = min(multiprocessing.cpu_count(), 8)
-    batch_size_pairs = max(1000, len(pairs_list) // (num_workers * 4))
-    batches = [pairs_list[i:i + batch_size_pairs] for i in range(0, len(pairs_list), batch_size_pairs)]
-
+    # Compute similarity metrics for pairs that meet the threshold
     all_results = []
-    if len(pairs_list) > 5000 and num_workers > 1:
-        # Parallel for large pair sets
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(compute_batch, batch) for batch in batches]
-            for future in as_completed(futures):
-                all_results.extend(future.result())
-        logger.info("Parallel similarity: %d results from %d pairs using %d workers",
-                    len(all_results), len(pairs_list), num_workers)
-    else:
-        # Sequential for small sets (avoid process overhead)
-        for batch in batches:
-            all_results.extend(compute_batch(batch))
+    for (dir_a, dir_b), shared_count in pair_shared_count.items():
+        checksums_a = dir_checksums[dir_a]
+        checksums_b = dir_checksums[dir_b]
+        union_count = len(checksums_a | checksums_b)
+        if not union_count:
+            continue
+
+        jaccard = (shared_count / union_count) * 100.0
+        if jaccard < threshold:
+            continue
+
+        a_subset_pct = (shared_count / len(checksums_a)) * 100.0 if checksums_a else 0.0
+        b_subset_pct = (shared_count / len(checksums_b)) * 100.0 if checksums_b else 0.0
+        shared_size = pair_shared_size[(dir_a, dir_b)]
+
+        if jaccard >= 99.0:
+            relationship = "exact"
+        elif a_subset_pct >= 95.0:
+            relationship = "subset"
+        elif b_subset_pct >= 95.0:
+            relationship = "superset"
+        else:
+            relationship = "overlap"
+
+        all_results.append({
+            "dir_a": dir_a, "dir_b": dir_b,
+            "files_a": len(checksums_a), "files_b": len(checksums_b),
+            "shared_files": shared_count, "shared_size": shared_size,
+            "size_a": dir_total_size.get(dir_a, 0),
+            "size_b": dir_total_size.get(dir_b, 0),
+            "jaccard_similarity": round(jaccard, 2),
+            "a_subset_pct": round(a_subset_pct, 2),
+            "b_subset_pct": round(b_subset_pct, 2),
+            "unique_to_a": len(checksums_a) - shared_count,
+            "unique_to_b": len(checksums_b) - shared_count,
+            "relationship": relationship,
+        })
 
     records = [
         DirectorySimilarity(
