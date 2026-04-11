@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ScanSearch,
@@ -7,8 +8,11 @@ import {
   ArrowRight,
   Clock,
   Files,
+  Trash2,
 } from "lucide-react";
-import { useScans } from "@/api/scans";
+import { useScans, useDeleteScan } from "@/api/scans";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,6 +29,7 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "s
   completed: "success",
   failed: "destructive",
   cancelled: "outline",
+  interrupted: "warning",
 };
 
 const statusColors: Record<string, string> = {
@@ -33,10 +38,13 @@ const statusColors: Record<string, string> = {
   completed: "bg-green-500",
   failed: "bg-red-500",
   cancelled: "bg-yellow-500",
+  interrupted: "bg-amber-500",
 };
 
 export function Dashboard() {
   const { data: scansData, isLoading } = useScans();
+  const deleteScan = useDeleteScan();
+  const [deleteId, setDeleteId] = useState<number | null>(null);
   const scans = scansData?.items ?? [];
 
   const totalScans = scansData?.total ?? 0;
@@ -176,10 +184,21 @@ export function Dashboard() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
                       <Badge variant={statusVariant[scan.status] ?? "secondary"} className="text-xs">
                         {scan.status}
                       </Badge>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDeleteId(scan.id);
+                        }}
+                        className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all"
+                        title="Delete scan"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                       <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   </Link>
@@ -227,6 +246,23 @@ export function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={deleteId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
+        title="Delete Scan"
+        description="Are you sure? This will delete the scan and all its results."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => {
+          if (deleteId) {
+            deleteScan.mutate(String(deleteId), {
+              onSuccess: () => { setDeleteId(null); toast.success("Scan deleted"); },
+              onError: () => toast.error("Failed to delete scan"),
+            });
+          }
+        }}
+      />
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import json
 import logging
+import multiprocessing
+import os
 import re
 from typing import Iterator, Optional
 
@@ -10,6 +12,17 @@ from app.scanners.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_size_string(size_str: str) -> Optional[int]:
+    """Parse a human-readable size string like '28.2 GB' into bytes."""
+    match = re.match(r"([\d.]+)\s*([KMGTP]?i?B?)", size_str.strip(), re.IGNORECASE)
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2).upper().replace("I", "").rstrip("B")
+    multipliers = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
+    return int(value * multipliers.get(unit, 1))
 
 
 class FclonesBackend(ScannerBackend):
@@ -32,9 +45,14 @@ class FclonesBackend(ScannerBackend):
         cmd.extend(all_paths)
         cmd.extend([
             "--cache",
+            "--min", "4096",        # Skip tiny files (<4KB)
             "-f", "json",
             "-o", output_path,
         ])
+
+        # Set thread pool to use all cores (fclones default is conservative)
+        ncpu = multiprocessing.cpu_count()
+        cmd.extend(["--threads", f"default:{ncpu},{ncpu}"])
 
         if len(all_paths) > 1:
             cmd.append("--isolate")
@@ -69,8 +87,8 @@ class FclonesBackend(ScannerBackend):
 
             if isinstance(group, dict):
                 files = group.get("files", group.get("paths", []))
-                checksum = group.get("hash", group.get("checksum", f"group_{group_idx}"))
-                file_size = group.get("size", 0)
+                checksum = group.get("file_hash", group.get("hash", group.get("checksum", f"group_{group_idx}")))
+                file_size = group.get("file_len", group.get("size", 0))
             elif isinstance(group, list):
                 files = group
                 checksum = f"group_{group_idx}"
@@ -185,7 +203,8 @@ class FclonesBackend(ScannerBackend):
             found_match = re.search(r"Found\s+([\d,]+)\s+\(([\d.]+\s*\w+)\)", msg)
             if found_match:
                 count = int(found_match.group(1).replace(",", ""))
-                return ScanProgressInfo(message=msg, total_files=count)
+                size_bytes = _parse_size_string(found_match.group(2))
+                return ScanProgressInfo(message=msg, total_files=count, total_size=size_bytes)
             scanned_match = re.search(r"Scanned\s+([\d,]+)", msg)
             if scanned_match:
                 count = int(scanned_match.group(1).replace(",", ""))

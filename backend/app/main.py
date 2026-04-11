@@ -19,12 +19,74 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _recover_orphaned_tasks():
+    """Mark tasks that were interrupted by a restart."""
+    from datetime import datetime, timezone
+    from sqlalchemy import update
+    from app.database import async_session
+    from app.models.scan import Scan
+    from app.models.action import Action
+
+    async with async_session() as db:
+        # Recover orphaned scans — preserve the phase they were in for resume
+        from sqlalchemy import select as sa_select
+        orphaned_q = sa_select(Scan).where(
+            Scan.status.in_(["running", "parsing", "analyzing", "pending"])
+        )
+        orphaned_result = await db.execute(orphaned_q)
+        orphaned_scans = orphaned_result.scalars().all()
+        for scan in orphaned_scans:
+            prev_phase = scan.status
+            if prev_phase == "pending":
+                # Pending scans that survived a restart were never picked up — re-enqueue them
+                try:
+                    from app.tasks.scan_tasks import run_scan_task
+                    run_scan_task(scan.id)
+                    logger.info("Re-enqueued pending scan %d", scan.id)
+                except Exception as e:
+                    scan.status = "failed"
+                    scan.error_message = f"Failed to re-enqueue after restart: {e}"
+                    scan.completed_at = datetime.now(timezone.utc)
+                    logger.error("Failed to re-enqueue scan %d: %s", scan.id, e)
+            else:
+                # Accumulate elapsed time from this run before marking interrupted
+                if scan.resumed_at:
+                    run_elapsed = int((datetime.now(timezone.utc) - scan.resumed_at.replace(tzinfo=timezone.utc)).total_seconds())
+                    scan.accumulated_seconds = (scan.accumulated_seconds or 0) + run_elapsed
+                scan.interrupted_phase = prev_phase
+                scan.status = "interrupted"
+                scan.error_message = f"Interrupted during {prev_phase} by restart"
+                scan.completed_at = datetime.now(timezone.utc)
+                logger.warning("Recovered orphaned scan %d (was %s) → interrupted", scan.id, prev_phase)
+
+        # Recover orphaned actions
+        result = await db.execute(
+            update(Action)
+            .where(Action.status == "executing")
+            .values(
+                status="failed",
+                error_message="Interrupted by restart",
+            )
+            .returning(Action.id)
+        )
+        orphaned_actions = result.all()
+        for (action_id,) in orphaned_actions:
+            logger.warning("Recovered orphaned action %d → failed", action_id)
+
+        await db.commit()
+
+    total = len(orphaned_scans) + len(orphaned_actions)
+    if total:
+        logger.info("Recovered %d orphaned tasks on startup", total)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Collective backend...")
     os.makedirs(settings.CONFIG_DIR, exist_ok=True)
     await init_db()
     logger.info("Database initialized")
+    await _recover_orphaned_tasks()
     yield
     logger.info("Shutting down Collective backend...")
 

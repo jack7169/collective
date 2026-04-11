@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import Base
 from app.models.duplicate import DuplicateDirectory, DuplicateFile
+from app.models.saved_scan import SavedScan
 from app.models.scan import Scan
 from app.models.similarity import DirectorySimilarity
 from app.scanners.base import DuplicateDirResult, DuplicateFileResult
@@ -41,7 +42,15 @@ def _update_progress(session: Session, scan_id: int, **kwargs):
 
 @huey.task()
 def run_scan_task(scan_id: int):
-    """Execute full scan pipeline synchronously (runs in Huey worker)."""
+    """Execute full scan pipeline synchronously (runs in Huey worker).
+
+    Supports phase-aware resume: if a scan was interrupted, it picks up
+    from the phase it was in (running → re-scan with cache, parsing → re-parse,
+    analyzing → re-analyze).
+
+    On container restart, startup recovery in main.py marks orphaned scans
+    as 'interrupted' with their phase preserved for resume.
+    """
     session = _get_sync_session()
     try:
         scan = session.get(Scan, scan_id)
@@ -53,15 +62,58 @@ def run_scan_task(scan_id: int):
             logger.info("Scan %d was cancelled before starting", scan_id)
             return
 
-        # Update status to running
-        scan.status = "running"
-        scan.started_at = datetime.now(timezone.utc)
-        scan.progress_percent = 0.0
-        scan.progress_message = "Starting scan..."
-        session.commit()
+        # Determine resume phase
+        resume_phase = scan.interrupted_phase if scan.status == "interrupted" else None
+        skip_scanner = False
+        skip_parsing = False
 
-        # Select scanner backend
-        if scan.scanner == "fclones":
+        settings = get_settings()
+        os.makedirs(settings.CONFIG_DIR, exist_ok=True)
+        output_path = os.path.join(settings.CONFIG_DIR, f"scan_{scan_id}_output.json")
+
+        if resume_phase == "analyzing":
+            # Files already in DB, just re-run analysis
+            skip_scanner = True
+            skip_parsing = True
+            logger.info("Scan %d: resuming from analyzing phase", scan_id)
+        elif resume_phase in ("parsing", "running") and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            # Output file exists and is non-empty — scanner finished, skip to parsing
+            skip_scanner = True
+            logger.info("Scan %d: output file exists (%d bytes), skipping scanner", scan_id, os.path.getsize(output_path))
+        elif resume_phase:
+            logger.info("Scan %d: resuming from %s phase (re-running scanner, cached hashes speed up steps 1-5)", scan_id, resume_phase)
+
+        # Clear resume state and track run timing
+        scan.interrupted_phase = None
+        scan.error_message = None
+        scan.completed_at = None
+        scan.resumed_at = datetime.now(timezone.utc)
+        if not scan.accumulated_seconds:
+            scan.accumulated_seconds = 0
+
+        if not skip_scanner:
+            # Update status to running
+            scan.status = "running"
+            if not scan.started_at:
+                scan.started_at = datetime.now(timezone.utc)
+            if not resume_phase:
+                scan.progress_percent = 0.0
+                scan.progress_message = "Starting scan..."
+            else:
+                scan.progress_message = "Resuming scan — cached file hashes make steps 1-5 near-instant..."
+            session.commit()
+
+        # Select scanner backend with auto-fallback
+        import shutil
+        scanner = scan.scanner or "fclones"
+        if scanner == "fclones" and not shutil.which("fclones"):
+            logger.warning("fclones not found, falling back to rmlint for scan %d", scan_id)
+            scanner = "rmlint"
+        if scanner == "rmlint" and not shutil.which("rmlint"):
+            logger.warning("rmlint not found, falling back to fclones for scan %d", scan_id)
+            scanner = "fclones"
+
+        if scanner == "fclones":
             backend = FclonesBackend()
         else:
             backend = RmlintBackend()
@@ -96,12 +148,19 @@ def run_scan_task(scan_id: int):
             winsize = struct.pack("HHHH", 24, 80, 0, 0)
             fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
+            # Use a per-scan cache dir so fclones doesn't contend
+            # on the shared hash database lock
+            scan_cache_dir = output_path.rsplit(".", 1)[0] + "_cache"
+            os.makedirs(scan_cache_dir, exist_ok=True)
+            scan_env = {**os.environ, "XDG_CACHE_HOME": scan_cache_dir}
+
             proc = subprocess.Popen(
                 cmd,
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
                 close_fds=True,
+                env=scan_env,
             )
             os.close(slave_fd)
 
@@ -129,6 +188,10 @@ def run_scan_task(scan_id: int):
                         break
                     text = chunk.decode("utf-8", errors="replace")
                     buf += text
+                    # fclones uses \x1b[J (erase display) as line separator
+                    # instead of \n. Normalize these to \n before splitting.
+                    buf = _re.sub(r"\x1b\[J", "\n", buf)
+                    buf = _re.sub(r"\x1b\[\d+D", "\n", buf)  # cursor back N
                     while "\n" in buf or "\r" in buf:
                         idx = -1
                         for sep in ("\n", "\r"):
@@ -176,11 +239,11 @@ def run_scan_task(scan_id: int):
                     if progress:
                         if progress.percent is not None:
                             scan.progress_percent = progress.percent
-                        if progress.total_files:
+                        if progress.total_files is not None:
                             scan.total_files = progress.total_files
-                        if progress.total_dirs:
+                        if progress.total_dirs is not None:
                             scan.total_dirs = progress.total_dirs
-                        if progress.total_size:
+                        if progress.total_size is not None:
                             scan.total_size = progress.total_size
                         if progress.message:
                             last_parsed_msg = progress.message
@@ -212,8 +275,12 @@ def run_scan_task(scan_id: int):
                 else:
                     scan.progress_message = f"Scanner running... {time_str} elapsed"
 
-                session.commit()
+                # Commit progress every 5 seconds (not every 1s) to reduce SQLite write pressure
+                if poll_count % 5 == 0:
+                    session.commit()
 
+            # Final commit for any remaining progress
+            session.commit()
             reader_thread.join(timeout=5)
             try:
                 os.close(master_fd)
@@ -237,78 +304,92 @@ def run_scan_task(scan_id: int):
             session.commit()
             return
 
-        # Parsing phase
-        scan.status = "parsing"
-        scan.progress_percent = 60.0
-        scan.progress_message = "Parsing scanner output..."
-        session.commit()
-
-        if not os.path.exists(output_path):
-            scan.status = "failed"
-            scan.error_message = "Scanner output file not found"
-            scan.completed_at = datetime.now(timezone.utc)
+        if not skip_parsing:
+            # Parsing phase
+            scan.status = "parsing"
+            scan.progress_percent = 60.0
+            scan.progress_message = "Parsing scanner output..."
             session.commit()
-            return
 
-        # Parse output and insert records
-        file_records = []
-        dir_records = []
-        total_files = 0
-        total_size = 0
-        duplicates = 0
-        unique_dirs: set[str] = set()
+            if not os.path.exists(output_path):
+                scan.status = "failed"
+                scan.error_message = "Scanner output file not found"
+                scan.completed_at = datetime.now(timezone.utc)
+                session.commit()
+                return
 
-        for result in backend.parse_output(output_path):
-            if isinstance(result, DuplicateFileResult):
-                file_records.append(DuplicateFile(
-                    scan_id=scan_id,
-                    checksum=result.checksum,
-                    path=result.path,
-                    size=result.size,
-                    mtime=result.mtime,
-                    is_original=result.is_original,
-                    group_id=result.group_id,
-                ))
-                total_files += 1
-                total_size += result.size
-                unique_dirs.add(os.path.dirname(result.path))
-                if not result.is_original:
-                    duplicates += 1
-            elif isinstance(result, DuplicateDirResult):
-                dir_records.append(DuplicateDirectory(
-                    scan_id=scan_id,
-                    group_id=result.group_id,
-                    path=result.path,
-                    file_count=result.file_count,
-                    total_size=result.total_size,
-                    is_original=result.is_original,
-                ))
-                unique_dirs.add(result.path)
+            # Clear any previous partial records (for clean resume)
+            session.execute(
+                delete(DuplicateFile).where(DuplicateFile.scan_id == scan_id)
+            )
+            session.execute(
+                delete(DuplicateDirectory).where(DuplicateDirectory.scan_id == scan_id)
+            )
+            session.commit()
 
-        # Bulk insert in batches
-        batch_size = 1000
-        for i in range(0, len(file_records), batch_size):
-            session.add_all(file_records[i:i + batch_size])
-            session.flush()
+        if not skip_parsing:
+            # Parse output and insert records
+            file_records = []
+            dir_records = []
+            total_files = 0
+            total_size = 0
+            duplicates = 0
+            unique_dirs: set[str] = set()
 
-        for i in range(0, len(dir_records), batch_size):
-            session.add_all(dir_records[i:i + batch_size])
-            session.flush()
+            for result in backend.parse_output(output_path):
+                if isinstance(result, DuplicateFileResult):
+                    file_records.append(DuplicateFile(
+                        scan_id=scan_id,
+                        checksum=result.checksum,
+                        path=result.path,
+                        size=result.size,
+                        mtime=result.mtime,
+                        is_original=result.is_original,
+                        group_id=result.group_id,
+                    ))
+                    total_files += 1
+                    total_size += result.size
+                    unique_dirs.add(os.path.dirname(result.path))
+                    if not result.is_original:
+                        duplicates += 1
+                elif isinstance(result, DuplicateDirResult):
+                    dir_records.append(DuplicateDirectory(
+                        scan_id=scan_id,
+                        group_id=result.group_id,
+                        path=result.path,
+                        file_count=result.file_count,
+                        total_size=result.total_size,
+                        is_original=result.is_original,
+                    ))
+                    unique_dirs.add(result.path)
 
-        session.commit()
+            # Bulk insert in batches
+            batch_size = 1000
+            for i in range(0, len(file_records), batch_size):
+                session.add_all(file_records[i:i + batch_size])
+                session.flush()
 
-        scan.total_files = total_files
-        scan.total_dirs = len(unique_dirs)
-        scan.total_size = total_size
-        scan.duplicates_found = duplicates
-        scan.space_recoverable = sum(
-            r.size for r in file_records if not r.is_original
-        )
+            for i in range(0, len(dir_records), batch_size):
+                session.add_all(dir_records[i:i + batch_size])
+                session.flush()
 
-        # Analysis phase
+            session.commit()
+
+            scan.total_files = total_files
+            scan.total_dirs = len(unique_dirs)
+            scan.total_size = total_size
+            scan.duplicates_found = duplicates
+            scan.space_recoverable = sum(
+                r.size for r in file_records if not r.is_original
+            )
+
+        # Analysis phase — clear old similarities if resuming
         scan.status = "analyzing"
         scan.progress_percent = 80.0
         scan.progress_message = "Computing directory similarities..."
+        session.execute(
+            delete(DirectorySimilarity).where(DirectorySimilarity.scan_id == scan_id)
+        )
         session.commit()
 
         # Run synchronous similarity analysis
@@ -326,11 +407,41 @@ def run_scan_task(scan_id: int):
         scan.completed_at = datetime.now(timezone.utc)
         session.commit()
 
-        # Clean up output file
+        # Auto-save: create a SavedScan if this scan isn't already linked to one
+        if not scan.saved_scan_id:
+            try:
+                saved = SavedScan(
+                    name=scan.name,
+                    scanner=scan.scanner,
+                    target_paths=scan.target_paths,
+                    tagged_paths=scan.tagged_paths,
+                    scanner_flags=scan.scanner_flags,
+                    scan_depth=scan.scan_depth,
+                    similarity_threshold=scan.similarity_threshold,
+                    last_scan_id=scan.id,
+                    last_run_at=scan.completed_at,
+                    total_runs=1,
+                    last_total_files=scan.total_files,
+                    last_duplicates_found=scan.duplicates_found,
+                    last_space_recoverable=scan.space_recoverable,
+                )
+                session.add(saved)
+                session.flush()
+                scan.saved_scan_id = saved.id
+                session.commit()
+                logger.info("Auto-saved scan %d as saved scan %d", scan_id, saved.id)
+            except Exception as e:
+                logger.warning("Failed to auto-save scan %d: %s", scan_id, e)
+
+        # Clean up output file and fclones cache dir
         try:
             os.remove(output_path)
         except OSError:
             pass
+        cache_dir = output_path.rsplit(".", 1)[0] + "_cache"
+        if os.path.isdir(cache_dir):
+            import shutil
+            shutil.rmtree(cache_dir, ignore_errors=True)
 
         logger.info("Scan %d completed successfully", scan_id)
 
@@ -444,59 +555,97 @@ def _compute_similarities_sync(
             for j in range(i + 1, len(dirs_list)):
                 candidate_pairs.add((dirs_list[i], dirs_list[j]))
 
-    # Compute similarities
-    records = []
-    for dir_a, dir_b in candidate_pairs:
-        checksums_a = dir_checksums[dir_a]
-        checksums_b = dir_checksums[dir_b]
+    # Compute similarities — parallelized across CPU cores
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    import multiprocessing
 
-        shared = checksums_a & checksums_b
-        union = checksums_a | checksums_b
-        if not union:
-            continue
+    # Prepare serializable data for worker processes
+    pairs_list = list(candidate_pairs)
+    logger.info("Computing similarities for %d candidate pairs across %d directories",
+                len(pairs_list), len(dir_checksums))
 
-        shared_count = len(shared)
-        jaccard = (shared_count / len(union)) * 100.0
-        if jaccard < threshold:
-            continue
+    # Convert sets to frozensets for pickling
+    dir_checksums_serial = {k: set(v) for k, v in dir_checksums.items()}
+    dir_sizes_serial = dict(dir_sizes)
+    dir_total_size_serial = dict(dir_total_size)
 
-        a_subset_pct = (shared_count / len(checksums_a)) * 100.0 if checksums_a else 0.0
-        b_subset_pct = (shared_count / len(checksums_b)) * 100.0 if checksums_b else 0.0
+    def compute_batch(batch):
+        """Compute similarities for a batch of pairs. Runs in worker process."""
+        results = []
+        for dir_a, dir_b in batch:
+            checksums_a = dir_checksums_serial.get(dir_a, set())
+            checksums_b = dir_checksums_serial.get(dir_b, set())
 
-        shared_size = sum(
-            dir_sizes[dir_a].get(cksum, dir_sizes[dir_b].get(cksum, 0))
-            for cksum in shared
-        )
+            shared = checksums_a & checksums_b
+            union = checksums_a | checksums_b
+            if not union:
+                continue
 
-        if jaccard >= 99.0:
-            relationship = "exact"
-        elif a_subset_pct >= 95.0:
-            relationship = "subset"
-        elif b_subset_pct >= 95.0:
-            relationship = "superset"
-        else:
-            relationship = "overlap"
+            shared_count = len(shared)
+            jaccard = (shared_count / len(union)) * 100.0
+            if jaccard < threshold:
+                continue
 
-        records.append(DirectorySimilarity(
+            a_subset_pct = (shared_count / len(checksums_a)) * 100.0 if checksums_a else 0.0
+            b_subset_pct = (shared_count / len(checksums_b)) * 100.0 if checksums_b else 0.0
+
+            sizes_a = dir_sizes_serial.get(dir_a, {})
+            sizes_b = dir_sizes_serial.get(dir_b, {})
+            shared_size = sum(sizes_a.get(cksum, sizes_b.get(cksum, 0)) for cksum in shared)
+
+            if jaccard >= 99.0:
+                relationship = "exact"
+            elif a_subset_pct >= 95.0:
+                relationship = "subset"
+            elif b_subset_pct >= 95.0:
+                relationship = "superset"
+            else:
+                relationship = "overlap"
+
+            results.append({
+                "dir_a": dir_a, "dir_b": dir_b,
+                "files_a": len(checksums_a), "files_b": len(checksums_b),
+                "shared_files": shared_count, "shared_size": shared_size,
+                "size_a": dir_total_size_serial.get(dir_a, 0),
+                "size_b": dir_total_size_serial.get(dir_b, 0),
+                "jaccard_similarity": round(jaccard, 2),
+                "a_subset_pct": round(a_subset_pct, 2),
+                "b_subset_pct": round(b_subset_pct, 2),
+                "unique_to_a": len(checksums_a - checksums_b),
+                "unique_to_b": len(checksums_b - checksums_a),
+                "relationship": relationship,
+            })
+        return results
+
+    # Split into batches and process in parallel
+    num_workers = min(multiprocessing.cpu_count(), 8)
+    batch_size_pairs = max(1000, len(pairs_list) // (num_workers * 4))
+    batches = [pairs_list[i:i + batch_size_pairs] for i in range(0, len(pairs_list), batch_size_pairs)]
+
+    all_results = []
+    if len(pairs_list) > 5000 and num_workers > 1:
+        # Parallel for large pair sets
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(compute_batch, batch) for batch in batches]
+            for future in as_completed(futures):
+                all_results.extend(future.result())
+        logger.info("Parallel similarity: %d results from %d pairs using %d workers",
+                    len(all_results), len(pairs_list), num_workers)
+    else:
+        # Sequential for small sets (avoid process overhead)
+        for batch in batches:
+            all_results.extend(compute_batch(batch))
+
+    records = [
+        DirectorySimilarity(
             scan_id=scan_id,
-            dir_a=dir_a,
-            dir_b=dir_b,
-            files_a=len(checksums_a),
-            files_b=len(checksums_b),
-            shared_files=shared_count,
-            shared_size=shared_size,
-            size_a=dir_total_size[dir_a],
-            size_b=dir_total_size[dir_b],
-            jaccard_similarity=round(jaccard, 2),
-            a_subset_pct=round(a_subset_pct, 2),
-            b_subset_pct=round(b_subset_pct, 2),
             structural_similarity=None,
-            unique_to_a=len(checksums_a - checksums_b),
-            unique_to_b=len(checksums_b - checksums_a),
-            relationship=relationship,
-        ))
+            **r,
+        )
+        for r in all_results
+    ]
 
-    # Bulk insert
+    # Bulk insert similarities
     batch_size = 1000
     for i in range(0, len(records), batch_size):
         session.add_all(records[i:i + batch_size])

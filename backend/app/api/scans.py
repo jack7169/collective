@@ -79,6 +79,54 @@ async def cancel_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
     return ScanResponse.model_validate(scan)
 
 
+@router.post("/{scan_id}/resume", response_model=ScanResponse)
+async def resume_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
+    """Resume an interrupted scan from where it left off.
+
+    Phase-aware resume:
+    - Interrupted during 'running' → re-runs scanner (fclones cache speeds this up)
+    - Interrupted during 'parsing' → skips scanner, re-parses output file
+    - Interrupted during 'analyzing' → skips scanner+parsing, re-runs analysis
+
+    Progress, name, and config are preserved from the original scan.
+    """
+    scan = await ScanService.get_scan(db, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.status not in ("interrupted", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only resume interrupted, failed, or cancelled scans (current: '{scan.status}')"
+        )
+
+    # For failed/cancelled scans that don't have an interrupted_phase, treat as full re-run
+    if not scan.interrupted_phase and scan.status in ("failed", "cancelled"):
+        scan.interrupted_phase = "running"
+
+    # Set status to interrupted so the task picks it up (task exits early on "cancelled")
+    scan.status = "interrupted"
+    scan.error_message = None
+    scan.completed_at = None
+    await db.commit()
+
+    try:
+        from app.tasks.scan_tasks import run_scan_task
+        run_scan_task(scan.id)
+        logger.info("Enqueued resume for scan %d (phase: %s)", scan_id, scan.interrupted_phase)
+    except Exception as e:
+        logger.error("Failed to enqueue resume: %s", e)
+        scan = await ScanService.get_scan(db, scan_id)
+        if scan:
+            scan.status = "failed"
+            scan.error_message = f"Failed to enqueue resume: {e}"
+            await db.commit()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Re-fetch to get latest state (task may have already started)
+    await db.refresh(scan)
+    return ScanResponse.model_validate(scan)
+
+
 @router.post("/{scan_id}/reanalyze", response_model=ScanResponse)
 async def reanalyze_scan(
     scan_id: int,
@@ -125,6 +173,20 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     await websocket.send_json({"error": "Scan not found"})
                     break
 
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+
+                # Current run elapsed (from resumed_at or started_at)
+                run_elapsed = None
+                ref_time = scan.resumed_at or scan.started_at
+                if ref_time:
+                    ref = ref_time if ref_time.tzinfo else ref_time.replace(tzinfo=timezone.utc)
+                    run_elapsed = int((now - ref).total_seconds())
+
+                # Total elapsed = accumulated from previous runs + current run
+                accumulated = scan.accumulated_seconds or 0
+                total_elapsed = accumulated + (run_elapsed or 0) if run_elapsed is not None else accumulated or None
+
                 progress = ScanProgress(
                     scan_id=scan.id,
                     status=scan.status,
@@ -134,10 +196,13 @@ async def scan_progress_ws(scan_id: int, websocket: WebSocket):
                     total_dirs=scan.total_dirs,
                     total_size=scan.total_size,
                     duplicates_found=scan.duplicates_found,
+                    elapsed_seconds=run_elapsed,
+                    total_elapsed_seconds=total_elapsed,
+                    started_at=scan.started_at,
                 )
-                await websocket.send_json(progress.model_dump())
+                await websocket.send_json(progress.model_dump(mode="json"))
 
-                if scan.status in ("completed", "failed", "cancelled"):
+                if scan.status in ("completed", "failed"):
                     break
 
             await asyncio.sleep(0.5)

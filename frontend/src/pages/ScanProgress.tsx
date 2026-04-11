@@ -11,9 +11,13 @@ import {
   FolderOpen,
   HardDrive,
   Layers,
+  AlertTriangle,
+  RotateCcw,
+  Clock,
+  Timer,
 } from "lucide-react";
 import { useScanProgress } from "@/api/websocket";
-import { useScan, useCancelScan } from "@/api/scans";
+import { useScan, useCancelScan, useResumeScan } from "@/api/scans";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +29,7 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatBytes, formatNumber } from "@/lib/format";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const phaseConfig: Record<
@@ -37,20 +42,40 @@ const phaseConfig: Record<
   completed: { icon: CheckCircle2, label: "Completed", color: "text-success", chipColor: "bg-green-500/10 text-green-400 border-green-500/20" },
   failed: { icon: XCircle, label: "Failed", color: "text-destructive", chipColor: "bg-red-500/10 text-red-400 border-red-500/20" },
   cancelled: { icon: XCircle, label: "Cancelled", color: "text-muted-foreground", chipColor: "bg-muted text-muted-foreground border-border" },
+  interrupted: { icon: AlertTriangle, label: "Interrupted", color: "text-amber-400", chipColor: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
 };
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h ${rm}m`;
+}
+
+function estimateRemaining(elapsed: number, percent: number): string | null {
+  if (percent <= 1 || elapsed < 10) return null; // Not enough data
+  const totalEstimated = (elapsed / percent) * 100;
+  const remaining = Math.max(0, Math.round(totalEstimated - elapsed));
+  if (remaining < 5) return "< 5s";
+  return `~${formatElapsed(remaining)}`;
+}
 
 export function ScanProgress() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { progress, isConnected } = useScanProgress(id);
+  const { progress, isConnected, reconnect } = useScanProgress(id);
   const { data: scan } = useScan(id);
   const cancelScan = useCancelScan();
+  const resumeScan = useResumeScan();
 
   // Map backend status to display phase
   const rawStatus = progress?.status ?? scan?.status ?? "pending";
   const phase = rawStatus === "running" ? "hashing" : rawStatus;
 
-  // Auto-navigate when completed or cancelled
+  // Auto-navigate when completed (not cancelled — user may want to resume)
   useEffect(() => {
     if (rawStatus === "completed") {
       const timer = setTimeout(() => {
@@ -58,43 +83,53 @@ export function ScanProgress() {
       }, 2000);
       return () => clearTimeout(timer);
     }
-    if (rawStatus === "cancelled") {
-      const timer = setTimeout(() => {
-        navigate("/", { replace: true });
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
   }, [rawStatus, id, navigate]);
 
   const phaseInfo = phaseConfig[phase] ?? phaseConfig["hashing"]!;
   const PhaseIcon = phaseInfo.icon;
   const percent = progress?.progress_percent ?? scan?.progress_percent ?? 0;
+  const runElapsed = progress?.elapsed_seconds ?? null;
+  const totalElapsed = progress?.total_elapsed_seconds ?? null;
+  const isActive = ["running", "parsing", "analyzing", "pending"].includes(rawStatus);
+
+  // Show "--" for metrics that aren't available yet during active scans
+  function metricValue(
+    val: number | null | undefined,
+    formatter: (n: number) => string
+  ): string {
+    if (val != null) return formatter(val);
+    if (isActive) return "--";
+    return formatter(0);
+  }
+
+  const eta = totalElapsed != null && percent > 0 ? estimateRemaining(totalElapsed, percent) : null;
+  const isResumed = totalElapsed != null && runElapsed != null && totalElapsed > runElapsed + 5;
 
   const metricCards = [
     {
       label: "Files",
-      value: formatNumber(progress?.total_files ?? scan?.total_files ?? 0),
+      value: metricValue(progress?.total_files ?? scan?.total_files, formatNumber),
       icon: Files,
       borderColor: "border-l-blue-500",
       iconColor: "text-blue-500",
     },
     {
       label: "Directories",
-      value: formatNumber(progress?.total_dirs ?? scan?.total_dirs ?? 0),
+      value: metricValue(progress?.total_dirs ?? scan?.total_dirs, formatNumber),
       icon: FolderOpen,
       borderColor: "border-l-green-500",
       iconColor: "text-green-500",
     },
     {
       label: "Total Size",
-      value: formatBytes(progress?.total_size ?? scan?.total_size ?? 0),
+      value: metricValue(progress?.total_size ?? scan?.total_size, formatBytes),
       icon: HardDrive,
       borderColor: "border-l-amber-500",
       iconColor: "text-amber-500",
     },
     {
       label: "Duplicates",
-      value: formatNumber(progress?.duplicates_found ?? scan?.duplicates_found ?? 0),
+      value: metricValue(progress?.duplicates_found ?? scan?.duplicates_found, formatNumber),
       icon: Layers,
       borderColor: "border-l-cyan-500",
       iconColor: "text-cyan-500",
@@ -123,7 +158,7 @@ export function ScanProgress() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {phase !== "completed" && phase !== "failed" ? (
+                {phase !== "completed" && phase !== "failed" && phase !== "interrupted" ? (
                   <Loader2 className={cn("h-5 w-5 animate-spin", phaseInfo.color)} />
                 ) : (
                   <PhaseIcon className={cn("h-5 w-5", phaseInfo.color)} />
@@ -142,9 +177,40 @@ export function ScanProgress() {
               value={percent}
               className={cn(
                 "h-2",
-                percent > 80 ? "[&>div]:bg-red-500" : percent > 60 ? "[&>div]:bg-amber-500" : "[&>div]:bg-green-500"
+                percent < 2 && isActive
+                  ? "[&>div]:animate-pulse [&>div]:w-full [&>div]:bg-primary/40"
+                  : "[&>div]:bg-primary"
               )}
             />
+
+            {/* Elapsed time + ETA bar — always visible during active scan */}
+            {isActive && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-3 w-3" />
+                    <span className="tabular-nums">
+                      Run: {runElapsed != null ? formatElapsed(runElapsed) : "--"}
+                    </span>
+                  </div>
+                  {isResumed && (
+                    <span className="tabular-nums text-muted-foreground/70">
+                      Total: {totalElapsed != null ? formatElapsed(totalElapsed) : "--"}
+                    </span>
+                  )}
+                </div>
+                {eta ? (
+                  <div className="flex items-center gap-1.5">
+                    <Timer className="h-3 w-3" />
+                    <span className="tabular-nums">
+                      Remaining: {eta}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground/50">Estimating...</span>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -199,7 +265,7 @@ export function ScanProgress() {
       </Card>
 
       {/* Cancel button */}
-      {phase !== "completed" && phase !== "failed" && rawStatus !== "cancelled" && (
+      {phase !== "completed" && phase !== "failed" && phase !== "interrupted" && rawStatus !== "cancelled" && (
         <div className="flex justify-center">
           <Button
             variant="outline"
@@ -214,10 +280,41 @@ export function ScanProgress() {
           </Button>
         </div>
       )}
-      {rawStatus === "cancelled" && (
-        <p className="text-center text-sm text-muted-foreground">
-          Scan cancelled. Redirecting to dashboard...
-        </p>
+      {/* Resume banner for cancelled/interrupted/failed */}
+      {(rawStatus === "cancelled" || rawStatus === "interrupted" || rawStatus === "failed") && (
+        <div className={cn(
+          "rounded-md p-4 text-center space-y-3 border",
+          rawStatus === "interrupted" ? "border-amber-500/50 bg-amber-500/10" :
+          rawStatus === "failed" ? "border-destructive/50 bg-destructive/10" :
+          "border-border bg-muted/50"
+        )}>
+          <p className={cn("text-sm",
+            rawStatus === "interrupted" ? "text-amber-400" :
+            rawStatus === "failed" ? "text-destructive" :
+            "text-muted-foreground"
+          )}>
+            {rawStatus === "interrupted" && "This scan was interrupted. Progress has been saved."}
+            {rawStatus === "cancelled" && "This scan was cancelled."}
+            {rawStatus === "failed" && `Scan failed${scan?.error_message ? `: ${scan.error_message.slice(0, 100)}` : "."}`}
+          </p>
+          <Button
+            onClick={() => {
+              if (id) {
+                resumeScan.mutate(id, {
+                  onSuccess: () => {
+                    toast.success("Scan resumed");
+                    reconnect(); // Force WebSocket reconnect to pick up new status
+                  },
+                  onError: () => toast.error("Failed to resume scan"),
+                });
+              }
+            }}
+            disabled={resumeScan.isPending}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {resumeScan.isPending ? "Resuming..." : "Resume Scan"}
+          </Button>
+        </div>
       )}
     </div>
   );

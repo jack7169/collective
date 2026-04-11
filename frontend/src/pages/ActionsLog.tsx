@@ -85,7 +85,7 @@ export function ActionsLog() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="planned">Planned</SelectItem>
             <SelectItem value="dry_run">Dry Run</SelectItem>
             <SelectItem value="confirmed">Confirmed</SelectItem>
             <SelectItem value="executing">Executing</SelectItem>

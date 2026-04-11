@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { get, post } from "./client";
 import type {
-  DuplicateDirectory,
+  DuplicateGroup,
   DirectorySimilarity,
   DirectorySimilarityFilters,
   DuplicateFile,
@@ -12,17 +12,6 @@ import type {
   FileOpResult,
   ScanSchedule,
 } from "./types";
-
-export function useDuplicateDirs(scanId: string | undefined, page = 1) {
-  return useQuery({
-    queryKey: ["scans", scanId, "duplicate-dirs", page],
-    queryFn: () =>
-      get<PaginatedResponse<DuplicateDirectory>>(
-        `/scans/${scanId}/duplicate-dirs?page=${page}&per_page=200`
-      ),
-    enabled: !!scanId,
-  });
-}
 
 export function useSimilarDirs(
   scanId: string | undefined,
@@ -43,6 +32,22 @@ export function useSimilarDirs(
     queryFn: () =>
       get<PaginatedResponse<DirectorySimilarity>>(
         `/scans/${scanId}/similar-dirs${qs ? `?${qs}` : ""}`
+      ),
+    enabled: !!scanId,
+  });
+}
+
+export function useDuplicateGroups(
+  scanId: string | undefined,
+  page = 1,
+  perPage = 20,
+  sortBy = "size"
+) {
+  return useQuery({
+    queryKey: ["scans", scanId, "duplicate-groups", page, perPage, sortBy],
+    queryFn: () =>
+      get<PaginatedResponse<DuplicateGroup>>(
+        `/scans/${scanId}/duplicate-groups?page=${page}&per_page=${perPage}&sort_by=${sortBy}`
       ),
     enabled: !!scanId,
   });
@@ -71,6 +76,7 @@ export function useCompare(
         `/compare?scan_id=${scanId}&dir_a=${encodeURIComponent(dirA!)}&dir_b=${encodeURIComponent(dirB!)}`
       ),
     enabled: !!scanId && !!dirA && !!dirB,
+    staleTime: Infinity,
   });
 }
 
@@ -80,6 +86,7 @@ export function useTreeDiff(dirA: string | null, dirB: string | null) {
     queryFn: () =>
       post<TreeDiffResult>("/compare/tree-diff", { dir_a: dirA, dir_b: dirB }),
     enabled: !!dirA && !!dirB,
+    staleTime: Infinity,
   });
 }
 

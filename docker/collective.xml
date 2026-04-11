@@ -18,6 +18,6 @@
   <Config Name="Data to Scan" Target="/data" Default="/mnt/user" Mode="ro" Description="Path to scan for duplicates (read-only by default)" Type="Path" Display="always" Required="true"/>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions" Type="Variable" Display="advanced"/>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions" Type="Variable" Display="advanced"/>
-  <Config Name="Default Scanner" Target="COLLECTIVE_SCANNER_DEFAULT" Default="rmlint" Mode="" Description="Default scanner engine (rmlint or fclones)" Type="Variable" Display="advanced"/>
+  <Config Name="Default Scanner" Target="COLLECTIVE_SCANNER_DEFAULT" Default="fclones" Mode="" Description="Default scanner engine (fclones or rmlint)" Type="Variable" Display="advanced"/>
   <Config Name="Similarity Threshold" Target="COLLECTIVE_SIMILARITY_THRESHOLD" Default="50" Mode="" Description="Minimum similarity % to report (0-100)" Type="Variable" Display="advanced"/>
 </Container>

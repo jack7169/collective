@@ -1,38 +1,28 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Files,
-  FolderSync,
-  HardDrive,
-  BarChart3,
-  ArrowRight,
   Trash2,
   BookmarkPlus,
   BookmarkCheck,
+  Layers,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
-import { useScan, useScanStats, useDeleteScan, useSaveFromScan } from "@/api/scans";
-import { useDuplicateDirs, useDuplicateFiles } from "@/api/results";
-import type { DuplicateDirectory } from "@/api/types";
+import { useScan, useScanStats, useDeleteScan, useSaveFromScan, useResumeScan } from "@/api/scans";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { StatsCards } from "@/components/results/StatsCards";
-import { formatBytes, formatDate, formatNumber } from "@/lib/format";
+import { SpaceChart } from "@/components/results/SpaceChart";
+import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
+import { SimilarDirectoriesTab } from "@/components/results/SimilarDirectoriesTab";
+import { formatDate } from "@/lib/format";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
@@ -41,6 +31,7 @@ const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" |
   cancelled: "warning",
   running: "secondary",
   pending: "secondary",
+  interrupted: "warning",
 };
 
 export function ScanResults() {
@@ -48,11 +39,12 @@ export function ScanResults() {
   const { data: scan, isLoading: scanLoading, isError: scanError } = useScan(id);
   const scanExists = !!scan;
   const { data: stats } = useScanStats(scanExists ? id : undefined);
-  const { data: dupDirsData } = useDuplicateDirs(scanExists ? id : undefined);
-  const [filesPage, setFilesPage] = useState(1);
-  const { data: dupFilesData } = useDuplicateFiles(scanExists ? id : undefined, filesPage);
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") ?? "overview";
   const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
+  const resumeScan = useResumeScan();
   const [showDelete, setShowDelete] = useState(false);
 
   if (scanLoading) {
@@ -92,6 +84,20 @@ export function ScanResults() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {(scan.status === "interrupted" || scan.status === "failed" || scan.status === "cancelled") && (
+            <Button
+              onClick={() => {
+                if (id) {
+                  resumeScan.mutate(id);
+                  navigate(`/scans/${id}/progress`);
+                }
+              }}
+              disabled={resumeScan.isPending}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {resumeScan.isPending ? "Resuming..." : "Resume Scan"}
+            </Button>
+          )}
           {scan.status === "completed" && !scan.saved_scan_id && (
             <Button
               variant="outline"
@@ -108,12 +114,6 @@ export function ScanResults() {
               Saved
             </Badge>
           )}
-          <Button asChild variant="outline">
-            <Link to={`/scans/${id}/similar`}>
-              <FolderSync className="h-4 w-4" />
-              Similar Directories
-            </Link>
-          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -125,18 +125,41 @@ export function ScanResults() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-6">
+      {/* Interrupted/failed banner */}
+      {scan.status === "interrupted" && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 flex items-center gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-amber-400">Scan interrupted</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {scan.error_message ?? "This scan was interrupted by a restart."}
+              {scan.total_files != null && ` Progress: ${scan.total_files.toLocaleString()} files scanned.`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <Tabs value={activeTab} onValueChange={(v) => setSearchParams({ tab: v }, { replace: true })} className="space-y-6">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="duplicates">Exact Duplicates</TabsTrigger>
+          <TabsTrigger value="groups">
+            <Layers className="h-4 w-4 mr-1" />
+            Duplicate Groups
+          </TabsTrigger>
           <TabsTrigger value="similar">Similar Directories</TabsTrigger>
-          <TabsTrigger value="files">Files</TabsTrigger>
         </TabsList>
 
         {/* Overview */}
         <TabsContent value="overview">
           <div className="space-y-6">
             {stats && <StatsCards stats={stats} />}
+
+            {stats && (
+              <SpaceChart
+                totalSize={stats.scan_total_size ?? 0}
+                recoverable={stats.space_recoverable}
+              />
+            )}
 
             {/* Scan details */}
             <Card>
@@ -186,171 +209,14 @@ export function ScanResults() {
           </div>
         </TabsContent>
 
-        {/* Exact Duplicates */}
-        <TabsContent value="duplicates">
-          {dupDirsData?.items && dupDirsData.items.length > 0 ? (
-            <div className="space-y-4">
-              {Object.entries(
-                dupDirsData.items.reduce<Record<string, DuplicateDirectory[]>>(
-                  (groups, dir) => {
-                    (groups[dir.group_id] ??= []).push(dir);
-                    return groups;
-                  },
-                  {}
-                )
-              ).map(([groupId, dirs]) => (
-                <Card key={groupId}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-mono">
-                        Group {groupId.slice(0, 12)}...
-                      </CardTitle>
-                      <Badge variant="outline">
-                        {formatBytes(dirs[0].total_size)} x {dirs.length} dirs
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-1">
-                      {dirs.map((dir) => (
-                        <div
-                          key={dir.path}
-                          className="flex items-center justify-between rounded px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors"
-                        >
-                          <span className="font-mono text-xs truncate max-w-[70%]">
-                            {dir.path}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {dir.is_original && (
-                              <Badge variant="success" className="text-xs">
-                                original
-                              </Badge>
-                            )}
-                            <span className="text-xs text-muted-foreground">
-                              {dir.file_count} files · {formatBytes(dir.total_size)}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Files className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground">
-                  No exact duplicate directories found
-                </p>
-              </CardContent>
-            </Card>
-          )}
+        {/* Duplicate Groups (Czkawka-style) */}
+        <TabsContent value="groups">
+          {id && <DuplicateGroupsList scanId={id} />}
         </TabsContent>
 
-        {/* Similar Directories (link) */}
+        {/* Similar Directories */}
         <TabsContent value="similar">
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <FolderSync className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground mb-4">
-                View directory similarity analysis with advanced filtering
-              </p>
-              <Button asChild>
-                <Link to={`/scans/${id}/similar`}>
-                  <BarChart3 className="h-4 w-4" />
-                  Open Similar Directories
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Files */}
-        <TabsContent value="files">
-          {dupFilesData?.items && dupFilesData.items.length > 0 ? (
-            <Card>
-              <CardContent className="pt-6">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead>Path</TableHead>
-                      <TableHead className="w-24">Size</TableHead>
-                      <TableHead className="w-32">Modified</TableHead>
-                      <TableHead className="w-20">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dupFilesData.items.map((file, i) => (
-                      <TableRow key={`${file.path}-${i}`} className="hover:bg-accent/50">
-                        <TableCell className="font-mono text-xs truncate max-w-md">
-                          {file.path}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {formatBytes(file.size)}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {file.mtime
-                            ? formatDate(new Date(file.mtime * 1000).toISOString())
-                            : "—"}
-                        </TableCell>
-                        <TableCell>
-                          {file.is_original ? (
-                            <Badge variant="success" className="text-xs">
-                              original
-                            </Badge>
-                          ) : (
-                            <Badge variant="destructive" className="text-xs">
-                              duplicate
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-
-                {/* Pagination */}
-                {dupFilesData.pages > 1 && (
-                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
-                    <span className="text-sm text-muted-foreground">
-                      Page {dupFilesData.page} of {dupFilesData.pages} (
-                      {formatNumber(dupFilesData.total)} files)
-                    </span>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={filesPage <= 1}
-                        onClick={() => setFilesPage((p) => p - 1)}
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={filesPage >= dupFilesData.pages}
-                        onClick={() => setFilesPage((p) => p + 1)}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Files className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground">
-                  No duplicate files found
-                </p>
-              </CardContent>
-            </Card>
-          )}
+          {id && <SimilarDirectoriesTab scanId={id} />}
         </TabsContent>
       </Tabs>
 

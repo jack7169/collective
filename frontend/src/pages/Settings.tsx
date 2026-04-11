@@ -1,14 +1,10 @@
-import { useState } from "react";
-import { Save, Info } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Save, Info, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { get, put } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -16,21 +12,63 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 
+interface UserSettings {
+  default_scanner: string;
+  similarity_threshold: number;
+  scan_depth: number;
+  read_only: boolean;
+}
+
 export function Settings() {
-  const [scanner, setScanner] = useState("rmlint");
+  const queryClient = useQueryClient();
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => get<UserSettings>("/system/settings"),
+  });
+
   const [threshold, setThreshold] = useState(50);
   const [depth, setDepth] = useState(5);
   const [readOnly, setReadOnly] = useState(false);
-  const [saved, setSaved] = useState(false);
+
+  // Sync local state when settings load
+  useEffect(() => {
+    if (settings) {
+      setThreshold(settings.similarity_threshold);
+      setDepth(settings.scan_depth);
+      setReadOnly(settings.read_only);
+    }
+  }, [settings]);
+
+  const saveMutation = useMutation({
+    mutationFn: (data: UserSettings) => put<UserSettings>("/system/settings", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      toast.success("Settings saved");
+    },
+    onError: () => {
+      toast.error("Failed to save settings");
+    },
+  });
 
   const handleSave = () => {
-    // In a real app this would call an API
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    saveMutation.mutate({
+      default_scanner: "fclones",
+      similarity_threshold: threshold,
+      scan_depth: depth,
+      read_only: readOnly,
+    });
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+        Loading settings...
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -40,27 +78,6 @@ export function Settings() {
           Configure default scan parameters and application behavior
         </p>
       </div>
-
-      {/* Default Scanner */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Default Scanner</CardTitle>
-          <CardDescription>
-            Scanner engine used for new scans by default
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select value={scanner} onValueChange={setScanner}>
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="rmlint">rmlint (Recommended)</SelectItem>
-              <SelectItem value="fclones">fclones</SelectItem>
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
 
       {/* Similarity Threshold */}
       <Card>
@@ -174,12 +191,19 @@ export function Settings() {
 
       {/* Save */}
       <div className="flex items-center justify-between">
-        {saved && (
+        {saveMutation.isSuccess && (
           <span className="text-sm text-success">Settings saved successfully</span>
         )}
-        {!saved && <span />}
-        <Button onClick={handleSave}>
-          <Save className="h-4 w-4" />
+        {saveMutation.isError && (
+          <span className="text-sm text-destructive">Failed to save settings</span>
+        )}
+        {!saveMutation.isSuccess && !saveMutation.isError && <span />}
+        <Button onClick={handleSave} disabled={saveMutation.isPending}>
+          {saveMutation.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="h-4 w-4" />
+          )}
           Save Settings
         </Button>
       </div>

@@ -36,7 +36,7 @@ async def get_db():
 
 
 async def init_db():
-    from app.models import action, duplicate, scan, settings as settings_model, similarity  # noqa: F811
+    from app.models import action, assimilate, duplicate, scan, settings as settings_model, similarity  # noqa: F811
 
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
@@ -47,3 +47,17 @@ async def init_db():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Add new columns to existing tables (SQLite ALTER TABLE)
+    async with engine.begin() as conn:
+        for table, column, col_type in [
+            ("scans", "interrupted_phase", "TEXT"),
+            ("scans", "resumed_at", "TIMESTAMP"),
+            ("scans", "accumulated_seconds", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                await conn.execute(
+                    __import__("sqlalchemy").text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                )
+            except Exception:
+                pass  # Column already exists

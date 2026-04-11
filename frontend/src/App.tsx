@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Toaster } from "sonner";
 import { Layout } from "@/components/layout/Layout";
 import { Dashboard } from "@/pages/Dashboard";
 import { NewScan } from "@/pages/NewScan";
@@ -10,6 +11,7 @@ import { DirectoryCompare } from "@/pages/DirectoryCompare";
 import { ActionsLog } from "@/pages/ActionsLog";
 import { SavedScans } from "@/pages/SavedScans";
 import { Settings } from "@/pages/Settings";
+import { AssimilateDuplicates } from "@/pages/AssimilateDuplicates";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,6 +26,7 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <Toaster theme="dark" position="bottom-right" richColors />
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
@@ -34,6 +37,7 @@ export default function App() {
             <Route path="/scans/:id/progress" element={<ScanProgress />} />
             <Route path="/scans/:id/similar" element={<SimilarDirectories />} />
             <Route path="/scans/:id/compare" element={<DirectoryCompare />} />
+            <Route path="/scans/:id/assimilate" element={<AssimilateDuplicates />} />
             <Route path="/actions" element={<ActionsLog />} />
             <Route path="/settings" element={<Settings />} />
           </Route>

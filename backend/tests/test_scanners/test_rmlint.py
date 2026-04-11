@@ -97,7 +97,7 @@ class TestRmlintParseProgress:
         backend = RmlintBackend()
         progress = backend.parse_progress("Now fingerprinting files...")
         assert progress is not None
-        assert "fingerprinting" in progress.message
+        assert "fingerprinting" in progress.message.lower()
 
     def test_file_count(self):
         backend = RmlintBackend()

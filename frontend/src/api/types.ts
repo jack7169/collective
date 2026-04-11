@@ -2,7 +2,7 @@ export interface Scan {
   id: number;
   saved_scan_id?: number | null;
   name: string;
-  status: "pending" | "running" | "parsing" | "analyzing" | "completed" | "failed" | "cancelled";
+  status: "pending" | "running" | "parsing" | "analyzing" | "completed" | "failed" | "cancelled" | "interrupted";
   scanner: "rmlint" | "fclones";
   target_paths: string[];
   tagged_paths?: string[] | null;
@@ -20,6 +20,7 @@ export interface Scan {
   created_at: string;
   progress_percent?: number | null;
   progress_message?: string | null;
+  interrupted_phase?: string | null;
 }
 
 export interface ScanStats {
@@ -53,16 +54,9 @@ export interface ScanProgress {
   total_dirs: number | null;
   total_size: number | null;
   duplicates_found: number | null;
-}
-
-export interface DuplicateDirectory {
-  id: number;
-  scan_id: number;
-  group_id: string;
-  path: string;
-  file_count: number;
-  total_size: number;
-  is_original: boolean;
+  elapsed_seconds: number | null;     // Current run
+  total_elapsed_seconds: number | null; // All runs combined
+  started_at: string | null;
 }
 
 export interface DuplicateFile {
@@ -184,6 +178,8 @@ export interface TreeDiffNode {
   size_b?: number;
   match?: "size_match" | "name_only";
   similarity?: number;
+  collapsed?: boolean;
+  child_count?: number;
   children?: TreeDiffNode[];
 }
 
@@ -211,6 +207,67 @@ export interface FileOpResult {
   operation: string;
   status: "success" | "error" | "dry_run";
   message?: string;
+}
+
+// Grouped duplicate files for Czkawka-style view
+export interface DuplicateFileInGroup {
+  id: number;
+  path: string;
+  size: number;
+  mtime: number | null;
+  is_original: boolean;
+}
+
+export interface DuplicateGroup {
+  checksum: string;
+  group_id: string | null;
+  file_count: number;
+  total_size: number;
+  files: DuplicateFileInGroup[];
+}
+
+// Assimilate session types
+export interface AssimilateSession {
+  id: number;
+  scan_id: number;
+  name: string;
+  status: "working" | "previewing" | "committing" | "committed" | "failed";
+  dir_a: string;
+  dir_b: string;
+  staged_operations: StagedOperation[];
+  warnings_acknowledged: string[];
+  preview_result: AssimilatePreview | null;
+  created_at: string | null;
+  updated_at: string | null;
+  committed_at: string | null;
+  error_message: string | null;
+  files_affected: number | null;
+  bytes_affected: number | null;
+}
+
+export interface StagedOperation {
+  type: "copy" | "move" | "delete";
+  source: string;
+  dest?: string;
+  description?: string;
+}
+
+export interface AssimilatePreview {
+  operations_count: number;
+  operations: StagedOperation[];
+  checksums_total: number;
+  checksums_preserved: number;
+  checksums_lost: number;
+  warnings: AssimilateWarning[];
+  all_acknowledged: boolean;
+  bytes_affected: number;
+  ready_to_commit: boolean;
+}
+
+export interface AssimilateWarning {
+  checksum: string;
+  files: string[];
+  acknowledged: boolean;
 }
 
 // Scheduler types (legacy — kept for compat)

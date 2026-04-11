@@ -7,7 +7,7 @@ from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.duplicate import DuplicateDirectory, DuplicateFile
+from app.models.duplicate import DuplicateFile
 from app.models.scan import Scan
 from app.models.similarity import DirectorySimilarity
 from app.schemas.common import PaginatedResponse
@@ -23,50 +23,6 @@ async def _get_scan_or_404(db: AsyncSession, scan_id: int) -> Scan:
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     return scan
-
-
-@router.get("/duplicate-dirs")
-async def list_duplicate_dirs(
-    scan_id: int,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=500),
-    db: AsyncSession = Depends(get_db),
-):
-    await _get_scan_or_404(db, scan_id)
-
-    count_q = select(func.count()).select_from(DuplicateDirectory).where(
-        DuplicateDirectory.scan_id == scan_id
-    )
-    total = (await db.execute(count_q)).scalar()
-
-    q = (
-        select(DuplicateDirectory)
-        .where(DuplicateDirectory.scan_id == scan_id)
-        .order_by(desc(DuplicateDirectory.total_size))
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-    )
-    result = await db.execute(q)
-    dirs = result.scalars().all()
-
-    from pydantic import BaseModel, ConfigDict
-
-    class DuplicateDirectoryResponse(BaseModel):
-        model_config = ConfigDict(from_attributes=True)
-        id: int
-        scan_id: int
-        group_id: str
-        path: str
-        file_count: int
-        total_size: int
-        is_original: bool
-
-    return PaginatedResponse.create(
-        items=[DuplicateDirectoryResponse.model_validate(d) for d in dirs],
-        total=total,
-        page=page,
-        per_page=per_page,
-    )
 
 
 @router.get("/similar-dirs")
@@ -124,6 +80,109 @@ async def list_similar_dirs(
         page=page,
         per_page=per_page,
     )
+
+
+@router.get("/duplicate-groups")
+async def list_duplicate_groups(
+    scan_id: int,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("size"),
+    sort_order: str = Query("desc"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return duplicate files grouped by checksum, paginated at group level."""
+    await _get_scan_or_404(db, scan_id)
+
+    from pydantic import BaseModel as BM, ConfigDict
+
+    class FileInGroup(BM):
+        model_config = ConfigDict(from_attributes=True)
+        id: int
+        path: str
+        size: int
+        mtime: Optional[float] = None
+        is_original: bool
+
+    class DuplicateGroupResponse(BM):
+        checksum: str
+        group_id: Optional[str] = None
+        file_count: int
+        total_size: int
+        files: list[FileInGroup]
+
+    # Count distinct groups with >1 file
+    count_q = (
+        select(func.count())
+        .select_from(
+            select(DuplicateFile.checksum)
+            .where(DuplicateFile.scan_id == scan_id)
+            .group_by(DuplicateFile.checksum)
+            .having(func.count() > 1)
+            .subquery()
+        )
+    )
+    total = (await db.execute(count_q)).scalar() or 0
+
+    # Get page of group checksums
+    sort_col_map = {
+        "size": func.sum(DuplicateFile.size),
+        "file_count": func.count(),
+    }
+    sort_expr = sort_col_map.get(sort_by, func.sum(DuplicateFile.size))
+    order = desc(sort_expr) if sort_order == "desc" else sort_expr.asc()
+
+    groups_q = (
+        select(
+            DuplicateFile.checksum,
+            func.count().label("file_count"),
+            func.sum(DuplicateFile.size).label("total_size"),
+            func.min(DuplicateFile.group_id).label("group_id"),
+        )
+        .where(DuplicateFile.scan_id == scan_id)
+        .group_by(DuplicateFile.checksum)
+        .having(func.count() > 1)
+        .order_by(order)
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
+    groups_result = await db.execute(groups_q)
+    groups = list(groups_result)
+
+    if not groups:
+        return PaginatedResponse.create(items=[], total=total, page=page, per_page=per_page)
+
+    # Fetch all files for those checksums in one query
+    checksums = [g.checksum for g in groups]
+    files_q = (
+        select(DuplicateFile)
+        .where(
+            DuplicateFile.scan_id == scan_id,
+            DuplicateFile.checksum.in_(checksums),
+        )
+        .order_by(desc(DuplicateFile.is_original), DuplicateFile.mtime.asc())
+    )
+    files_result = await db.execute(files_q)
+    all_files = files_result.scalars().all()
+
+    # Group files by checksum
+    files_by_checksum: dict[str, list] = {}
+    for f in all_files:
+        files_by_checksum.setdefault(f.checksum, []).append(f)
+
+    # Build response maintaining group order
+    items = []
+    for g in groups:
+        group_files = files_by_checksum.get(g.checksum, [])
+        items.append(DuplicateGroupResponse(
+            checksum=g.checksum,
+            group_id=g.group_id,
+            file_count=g.file_count,
+            total_size=g.total_size,
+            files=[FileInGroup.model_validate(f) for f in group_files],
+        ))
+
+    return PaginatedResponse.create(items=items, total=total, page=page, per_page=per_page)
 
 
 @router.get("/duplicate-files")
@@ -350,3 +409,136 @@ async def get_tagged_originals(
     return {
         "tagged_paths": scan.tagged_paths or [],
     }
+
+
+class KeeperDecisionItem(BaseModel):
+    group_checksum: str
+    kept_file_id: int
+
+
+class SuggestKeepersRequest(BaseModel):
+    decisions: list[KeeperDecisionItem]
+
+
+class SuggestedKeeperItem(BaseModel):
+    group_checksum: str
+    suggested_file_id: int
+    confidence: float
+    reason: str
+
+
+class SuggestKeepersResponse(BaseModel):
+    suggestions: list[SuggestedKeeperItem]
+    pattern: Optional[dict] = None
+
+
+@router.post("/suggest-keepers")
+async def suggest_keepers(
+    scan_id: int,
+    body: SuggestKeepersRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Analyze user keeper decisions and suggest keepers for remaining groups."""
+    await _get_scan_or_404(db, scan_id)
+
+    if len(body.decisions) < 3:
+        return SuggestKeepersResponse(suggestions=[], pattern=None)
+
+    # Fetch the kept files to extract their paths
+    kept_ids = [d.kept_file_id for d in body.decisions]
+    result = await db.execute(
+        select(DuplicateFile).where(
+            DuplicateFile.scan_id == scan_id,
+            DuplicateFile.id.in_(kept_ids),
+        )
+    )
+    kept_files = {f.id: f for f in result.scalars().all()}
+
+    # Extract directory prefixes from kept files
+    import os
+    prefix_counts: dict[str, int] = {}
+    for decision in body.decisions:
+        f = kept_files.get(decision.kept_file_id)
+        if not f:
+            continue
+        parent = os.path.dirname(f.path)
+        parts = parent.split("/")
+        for i in range(2, len(parts) + 1):
+            prefix = "/".join(parts[:i])
+            prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+
+    if not prefix_counts:
+        return SuggestKeepersResponse(suggestions=[], pattern=None)
+
+    # Find the most specific prefix that matches most decisions
+    total = len(body.decisions)
+    best_prefix = ""
+    best_score = 0.0
+    for prefix, count in prefix_counts.items():
+        score = (count / total) * len(prefix)
+        if count >= 2 and score > best_score:
+            best_prefix = prefix
+            best_score = score
+
+    if not best_prefix:
+        return SuggestKeepersResponse(suggestions=[], pattern=None)
+
+    match_count = prefix_counts[best_prefix]
+    confidence = match_count / total
+
+    # Find unresolved groups and suggest keepers
+    decided_checksums = {d.group_checksum for d in body.decisions}
+
+    groups_q = (
+        select(
+            DuplicateFile.checksum,
+            func.count().label("cnt"),
+        )
+        .where(DuplicateFile.scan_id == scan_id)
+        .group_by(DuplicateFile.checksum)
+        .having(func.count() > 1)
+    )
+    groups_result = await db.execute(groups_q)
+    all_checksums = {row.checksum for row in groups_result}
+    undecided = all_checksums - decided_checksums
+
+    if not undecided:
+        return SuggestKeepersResponse(
+            suggestions=[],
+            pattern={
+                "preferred_prefix": best_prefix,
+                "match_count": match_count,
+                "total_decisions": total,
+            },
+        )
+
+    # Fetch files for undecided groups
+    files_q = select(DuplicateFile).where(
+        DuplicateFile.scan_id == scan_id,
+        DuplicateFile.checksum.in_(undecided),
+    )
+    files_result = await db.execute(files_q)
+    files_by_checksum: dict[str, list] = {}
+    for f in files_result.scalars().all():
+        files_by_checksum.setdefault(f.checksum, []).append(f)
+
+    # For each undecided group, see if exactly one file matches the pattern
+    suggestions = []
+    for checksum, files in files_by_checksum.items():
+        matching = [f for f in files if f.path.startswith(best_prefix + "/")]
+        if len(matching) == 1:
+            suggestions.append(SuggestedKeeperItem(
+                group_checksum=checksum,
+                suggested_file_id=matching[0].id,
+                confidence=confidence,
+                reason=f"Path matches pattern: {best_prefix}/",
+            ))
+
+    return SuggestKeepersResponse(
+        suggestions=suggestions,
+        pattern={
+            "preferred_prefix": best_prefix,
+            "match_count": match_count,
+            "total_decisions": total,
+        },
+    )

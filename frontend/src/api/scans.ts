@@ -23,7 +23,9 @@ export function useScan(id: string | undefined) {
     enabled: !!id,
     refetchInterval: (query) => {
       const scan = query.state.data;
-      if (scan?.status === "running") return 5_000;
+      if (!scan) return 5_000; // Not loaded yet, keep polling
+      const active = ["pending", "running", "parsing", "analyzing", "interrupted"];
+      if (active.includes(scan.status)) return 5_000;
       return false;
     },
   });
@@ -53,6 +55,17 @@ export function useCancelScan() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => post<void>(`/scans/${id}/cancel`),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["scans", id] });
+      queryClient.invalidateQueries({ queryKey: ["scans"] });
+    },
+  });
+}
+
+export function useResumeScan() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => post<Scan>(`/scans/${id}/resume`),
     onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ["scans", id] });
       queryClient.invalidateQueries({ queryKey: ["scans"] });
