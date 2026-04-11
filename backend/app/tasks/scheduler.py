@@ -10,7 +10,7 @@ import signal
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -42,7 +42,18 @@ signal.signal(signal.SIGINT, _signal_handler)
 def _get_session() -> Session:
     settings = get_settings()
     sync_url = settings.DATABASE_URL.replace("sqlite+aiosqlite:", "sqlite:")
-    engine = create_engine(sync_url, connect_args={"check_same_thread": False})
+    engine = create_engine(
+        sync_url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_pragmas(dbapi_conn, _rec):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.close()
+
     Base.metadata.create_all(engine)
     return Session(engine)
 

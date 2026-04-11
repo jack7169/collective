@@ -5,7 +5,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, select, delete, func
+from sqlalchemy import create_engine, event, select, delete, func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -26,7 +26,18 @@ def _get_sync_session() -> Session:
     """Create a synchronous SQLAlchemy session for Huey worker context."""
     settings = get_settings()
     sync_url = settings.DATABASE_URL.replace("sqlite+aiosqlite:", "sqlite:")
-    engine = create_engine(sync_url, connect_args={"check_same_thread": False})
+    engine = create_engine(
+        sync_url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_pragmas(dbapi_conn, _rec):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.close()
+
     return Session(engine)
 
 
