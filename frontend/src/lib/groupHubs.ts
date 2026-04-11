@@ -107,12 +107,25 @@ export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
     (a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0)
   );
 
-  // Greedy hub selection
+  // Greedy hub selection — uses prefix matching so subdirectories
+  // of already-claimed paths don't become separate hubs
   const claimed = new Set<string>();
   const hubs: DirectoryHub[] = [];
 
+  function isClaimed(dir: string): boolean {
+    if (claimed.has(dir)) return true;
+    // Check if dir is a subdirectory of any claimed path, or vice versa
+    const dirSlash = dir + "/";
+    for (const c of claimed) {
+      if (dirSlash.startsWith(c + "/") || (c + "/").startsWith(dirSlash)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   for (const dir of sorted) {
-    if (claimed.has(dir)) continue;
+    if (isClaimed(dir)) continue;
 
     const peers = adjacency.get(dir)!;
     const firstPeer = peers[0];
@@ -139,6 +152,8 @@ export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
       totalReclaimable,
     });
 
+    // Claim the hub itself and all its peers
+    claimed.add(dir);
     for (const peer of sortedPeers) {
       claimed.add(peer.directory);
     }
