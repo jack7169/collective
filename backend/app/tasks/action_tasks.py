@@ -4,38 +4,19 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, event, select
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from app.config import get_settings
+from app.database import get_sync_session
 from app.models.action import Action
 from app.tasks.worker import huey
 
 logger = logging.getLogger(__name__)
 
 
-def _get_sync_session() -> Session:
-    settings = get_settings()
-    sync_url = settings.DATABASE_URL.replace("sqlite+aiosqlite:", "sqlite:")
-    engine = create_engine(
-        sync_url,
-        connect_args={"check_same_thread": False, "timeout": 30},
-    )
-
-    @event.listens_for(engine, "connect")
-    def _set_pragmas(dbapi_conn, _rec):
-        cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA busy_timeout=30000")
-        cur.close()
-
-    return Session(engine)
-
-
 @huey.task()
 def execute_action_task(action_id: int):
     """Execute a confirmed consolidation action."""
-    session = _get_sync_session()
+    session = get_sync_session()
     try:
         action = session.get(Action, action_id)
         if not action:

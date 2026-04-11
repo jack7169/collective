@@ -10,11 +10,9 @@ import signal
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, event, select
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from app.config import get_settings
-from app.database import Base
+from app.database import get_sync_session
 from app.models.saved_scan import SavedScan
 from app.models.scan import Scan
 
@@ -37,25 +35,6 @@ def _signal_handler(signum, frame):
 
 signal.signal(signal.SIGTERM, _signal_handler)
 signal.signal(signal.SIGINT, _signal_handler)
-
-
-def _get_session() -> Session:
-    settings = get_settings()
-    sync_url = settings.DATABASE_URL.replace("sqlite+aiosqlite:", "sqlite:")
-    engine = create_engine(
-        sync_url,
-        connect_args={"check_same_thread": False, "timeout": 30},
-    )
-
-    @event.listens_for(engine, "connect")
-    def _set_pragmas(dbapi_conn, _rec):
-        cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA busy_timeout=30000")
-        cur.close()
-
-    Base.metadata.create_all(engine)
-    return Session(engine)
 
 
 def _compute_next_run(saved: SavedScan) -> datetime | None:
@@ -119,7 +98,7 @@ def run_scheduler():
 
     while _running:
         try:
-            session = _get_session()
+            session = get_sync_session()
             now = datetime.now(timezone.utc)
 
             # Auto-recover stale scans (stuck "running" for >24h)

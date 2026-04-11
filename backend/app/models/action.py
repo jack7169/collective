@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    BigInteger, Column, DateTime, ForeignKey, Integer, String, Text, func,
+    BigInteger, Column, DateTime, ForeignKey, Index, Integer, String, Text, func,
 )
 from app.database import Base
 
@@ -24,6 +24,10 @@ class Action(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
+    __table_args__ = (
+        Index("ix_actions_scan_id", "scan_id"),
+    )
+
 
 class Bookmark(Base):
     __tablename__ = "bookmarks"
@@ -35,3 +39,7 @@ class Bookmark(Base):
     notes = Column(Text, nullable=True)
     color = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_bookmarks_scan_id", "scan_id"),
+    )

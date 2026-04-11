@@ -5,6 +5,7 @@ from typing import Any, Optional
 from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.compare import clear_caches_for_scan
 from app.models.action import Action, Bookmark
 from app.models.duplicate import DuplicateDirectory, DuplicateFile
 from app.models.scan import Scan
@@ -78,6 +79,9 @@ class ScanService:
 
     @staticmethod
     async def delete_scan(db: AsyncSession, scan_id: int) -> None:
+        # Clear cached compare/tree data for this scan
+        clear_caches_for_scan(scan_id)
+
         # Small tables — delete in one shot
         await db.execute(delete(Bookmark).where(Bookmark.scan_id == scan_id))
         await db.execute(delete(Action).where(Action.scan_id == scan_id))

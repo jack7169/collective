@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from functools import lru_cache
+from collections import OrderedDict
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,8 +16,35 @@ from app.models.duplicate import DuplicateFile
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/compare", tags=["compare"])
 
-# Server-side cache for comparison results (scan data is immutable after completion)
-_compare_cache: dict[str, Any] = {}
+
+class _LRUCache(OrderedDict):
+    """Simple LRU cache using OrderedDict — no external dependencies."""
+    def __init__(self, maxsize: int = 256):
+        super().__init__()
+        self._maxsize = maxsize
+
+    def __getitem__(self, key):
+        self.move_to_end(key)
+        return super().__getitem__(key)
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self._maxsize:
+            self.popitem(last=False)
+
+
+_compare_cache: _LRUCache = _LRUCache(maxsize=256)
+
+
+def clear_caches_for_scan(scan_id: int):
+    """Remove cached entries for a specific scan."""
+    prefix = f"{scan_id}:"
+    for cache in (_compare_cache, _tree_cache):
+        keys = [k for k in cache if k.startswith(prefix)]
+        for k in keys:
+            del cache[k]
 
 
 @router.get("")
@@ -251,7 +278,7 @@ class DirectoryTreeRequest(BaseModel):
     max_depth: int = 5
 
 
-_tree_cache: dict[str, Any] = {}
+_tree_cache: _LRUCache = _LRUCache(maxsize=64)
 
 
 @router.post("/tree-diff")

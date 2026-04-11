@@ -334,44 +334,28 @@ async def tag_originals(
         )
         tagged_count += result.rowcount
 
-    # Step 3: For checksum groups that have NO original yet (none of
-    # their files fall under a tagged path), pick the first file as original
-    # so every group has at least one
-    all_checksums_q = (
-        select(DuplicateFile.checksum)
-        .where(DuplicateFile.scan_id == scan_id)
-        .group_by(DuplicateFile.checksum)
-        .having(func.count() > 1)
-    )
-    checksum_result = await db.execute(all_checksums_q)
-    all_checksums = [row[0] for row in checksum_result]
-
-    for cksum in all_checksums:
-        # Check if this group already has an original
-        has_original_q = select(func.count()).where(
-            DuplicateFile.scan_id == scan_id,
-            DuplicateFile.checksum == cksum,
-            DuplicateFile.is_original == True,  # noqa: E712
-        )
-        has_original = (await db.execute(has_original_q)).scalar()
-        if has_original == 0:
-            # Pick the first file as original
-            first_q = (
-                select(DuplicateFile.id)
-                .where(
-                    DuplicateFile.scan_id == scan_id,
-                    DuplicateFile.checksum == cksum,
-                )
-                .order_by(DuplicateFile.id)
-                .limit(1)
+    # Step 3: For checksum groups that have NO original yet, pick the
+    # lowest-ID file as original — single SQL instead of per-checksum loop
+    from sqlalchemy import text as sa_text
+    await db.execute(
+        sa_text("""
+            UPDATE duplicate_files
+            SET is_original = 1
+            WHERE id IN (
+                SELECT MIN(df.id)
+                FROM duplicate_files df
+                LEFT JOIN duplicate_files df_orig
+                    ON df_orig.scan_id = df.scan_id
+                    AND df_orig.checksum = df.checksum
+                    AND df_orig.is_original = 1
+                WHERE df.scan_id = :scan_id
+                GROUP BY df.checksum
+                HAVING COUNT(df.id) > 1
+                    AND COUNT(df_orig.id) = 0
             )
-            first = (await db.execute(first_q)).scalar()
-            if first:
-                await db.execute(
-                    update(DuplicateFile)
-                    .where(DuplicateFile.id == first)
-                    .values(is_original=True)
-                )
+        """),
+        {"scan_id": scan_id},
+    )
 
     # Step 4: Recompute scan stats
     dupes_q = select(func.count()).where(

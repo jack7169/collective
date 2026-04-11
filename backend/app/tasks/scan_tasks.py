@@ -5,11 +5,11 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, event, select, delete, func
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.database import Base
+from app.database import get_sync_session
 from app.models.duplicate import DuplicateDirectory, DuplicateFile
 from app.models.saved_scan import SavedScan
 from app.models.scan import Scan
@@ -20,25 +20,6 @@ from app.scanners.rmlint import RmlintBackend
 from app.tasks.worker import huey
 
 logger = logging.getLogger(__name__)
-
-
-def _get_sync_session() -> Session:
-    """Create a synchronous SQLAlchemy session for Huey worker context."""
-    settings = get_settings()
-    sync_url = settings.DATABASE_URL.replace("sqlite+aiosqlite:", "sqlite:")
-    engine = create_engine(
-        sync_url,
-        connect_args={"check_same_thread": False, "timeout": 30},
-    )
-
-    @event.listens_for(engine, "connect")
-    def _set_pragmas(dbapi_conn, _rec):
-        cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA busy_timeout=30000")
-        cur.close()
-
-    return Session(engine)
 
 
 def _update_progress(session: Session, scan_id: int, **kwargs):
@@ -62,7 +43,7 @@ def run_scan_task(scan_id: int):
     On container restart, startup recovery in main.py marks orphaned scans
     as 'interrupted' with their phase preserved for resume.
     """
-    session = _get_sync_session()
+    session = get_sync_session()
     try:
         scan = session.get(Scan, scan_id)
         if not scan:
@@ -474,7 +455,7 @@ def run_scan_task(scan_id: int):
 @huey.task()
 def run_reanalysis_task(scan_id: int):
     """Re-run similarity analysis on existing scan data."""
-    session = _get_sync_session()
+    session = get_sync_session()
     try:
         scan = session.get(Scan, scan_id)
         if not scan:
@@ -528,12 +509,15 @@ def _compute_similarities_sync(
     """Synchronous version of similarity computation for Huey worker."""
     from collections import defaultdict
 
-    # Load all duplicate files
-    files = session.execute(
-        select(DuplicateFile).where(DuplicateFile.scan_id == scan_id)
-    ).scalars().all()
+    # Stream duplicate files — fetch only needed columns, never load all rows at once
+    stmt = (
+        select(DuplicateFile.path, DuplicateFile.checksum, DuplicateFile.size)
+        .where(DuplicateFile.scan_id == scan_id)
+    )
+    result = session.execute(stmt)
+    rows = result.fetchall()
 
-    if not files:
+    if not rows:
         return 0
 
     # Group by parent directory
@@ -541,16 +525,16 @@ def _compute_similarities_sync(
     dir_sizes: dict[str, dict[str, int]] = defaultdict(dict)
     dir_total_size: dict[str, int] = defaultdict(int)
 
-    for f in files:
-        parent = os.path.dirname(f.path)
+    for path, checksum, size in rows:
+        parent = os.path.dirname(path)
         if depth is not None and depth > 0:
             parts = parent.rstrip("/").split("/")
             if len(parts) > depth + 1:
                 parent = "/".join(parts[:depth + 1])
 
-        dir_checksums[parent].add(f.checksum)
-        dir_sizes[parent][f.checksum] = f.size
-        dir_total_size[parent] += f.size
+        dir_checksums[parent].add(checksum)
+        dir_sizes[parent][checksum] = size
+        dir_total_size[parent] += size
 
     # Build inverted index
     checksum_to_dirs: dict[str, set[str]] = defaultdict(set)
