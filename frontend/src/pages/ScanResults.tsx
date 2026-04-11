@@ -8,7 +8,7 @@ import {
   RotateCcw,
   AlertTriangle,
 } from "lucide-react";
-import { useScan, useScanStats, useDeleteScan, useSaveFromScan, useResumeScan } from "@/api/scans";
+import { useScan, useScanStats, useSaveFromScan, useResumeScan } from "@/api/scans";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -23,7 +23,7 @@ import { SpaceChart } from "@/components/results/SpaceChart";
 import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
 import { SimilarDirectoriesTab } from "@/components/results/SimilarDirectoriesTab";
 import { formatDate } from "@/lib/format";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { DeleteScanDialog } from "@/components/common/DeleteScanDialog";
 
 const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
   completed: "success",
@@ -42,7 +42,6 @@ export function ScanResults() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") ?? "overview";
-  const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
   const resumeScan = useResumeScan();
   const [showDelete, setShowDelete] = useState(false);
@@ -220,27 +219,10 @@ export function ScanResults() {
         </TabsContent>
       </Tabs>
 
-      <ConfirmDialog
-        open={showDelete}
-        onOpenChange={(open) => {
-          if (!deleteScan.isPending) setShowDelete(open);
-        }}
-        title="Delete Scan"
-        description={
-          deleteScan.isPending
-            ? "Deleting scan data... This may take a moment for large scans."
-            : "Are you sure you want to delete this scan? This action cannot be undone."
-        }
-        confirmLabel={deleteScan.isPending ? "Deleting..." : "Delete"}
-        variant="destructive"
-        isPending={deleteScan.isPending}
-        onConfirm={() => {
-          if (id && !deleteScan.isPending) {
-            deleteScan.mutate(id, {
-              onSuccess: () => navigate("/"),
-            });
-          }
-        }}
+      <DeleteScanDialog
+        scanId={showDelete ? id ?? null : null}
+        onClose={() => setShowDelete(false)}
+        navigateOnSuccess="/"
       />
     </div>
   );

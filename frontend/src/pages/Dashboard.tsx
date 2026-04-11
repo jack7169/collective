@@ -10,8 +10,8 @@ import {
   Files,
   Trash2,
 } from "lucide-react";
-import { useScans, useDeleteScan } from "@/api/scans";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { useScans } from "@/api/scans";
+import { DeleteScanDialog } from "@/components/common/DeleteScanDialog";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +43,6 @@ const statusColors: Record<string, string> = {
 
 export function Dashboard() {
   const { data: scansData, isLoading } = useScans();
-  const deleteScan = useDeleteScan();
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const scans = scansData?.items ?? [];
 
@@ -247,21 +246,10 @@ export function Dashboard() {
         </Card>
       </div>
 
-      <ConfirmDialog
-        open={deleteId !== null}
-        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
-        title="Delete Scan"
-        description="Are you sure? This will delete the scan and all its results."
-        confirmLabel="Delete"
-        variant="destructive"
-        onConfirm={() => {
-          if (deleteId) {
-            deleteScan.mutate(String(deleteId), {
-              onSuccess: () => { setDeleteId(null); toast.success("Scan deleted"); },
-              onError: () => toast.error("Failed to delete scan"),
-            });
-          }
-        }}
+      <DeleteScanDialog
+        scanId={deleteId}
+        onClose={() => setDeleteId(null)}
+        onSuccess={() => toast.success("Scan deleted")}
       />
     </div>
   );
