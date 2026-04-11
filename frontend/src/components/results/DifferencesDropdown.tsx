@@ -331,9 +331,9 @@ export function DifferencesDropdown({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <Link
-                    to={`/scans/${scanId}/compare?a=${encodeURIComponent(dirA)}&b=${encodeURIComponent(dirB)}`}
+                    to={`/scans/${scanId}/assimilate?a=${encodeURIComponent(dirA)}&b=${encodeURIComponent(dirB)}`}
                   >
-                    Open Full Compare
+                    Assimilate
                   </Link>
                 </Button>
               </div>

@@ -7,7 +7,6 @@ import { NewScan } from "@/pages/NewScan";
 import { ScanProgress } from "@/pages/ScanProgress";
 import { ScanResults } from "@/pages/ScanResults";
 import { SimilarDirectories } from "@/pages/SimilarDirectories";
-import { DirectoryCompare } from "@/pages/DirectoryCompare";
 import { ActionsLog } from "@/pages/ActionsLog";
 import { SavedScans } from "@/pages/SavedScans";
 import { Settings } from "@/pages/Settings";
@@ -36,7 +35,6 @@ export default function App() {
             <Route path="/scans/:id" element={<ScanResults />} />
             <Route path="/scans/:id/progress" element={<ScanProgress />} />
             <Route path="/scans/:id/similar" element={<SimilarDirectories />} />
-            <Route path="/scans/:id/compare" element={<DirectoryCompare />} />
             <Route path="/scans/:id/assimilate" element={<AssimilateDuplicates />} />
             <Route path="/actions" element={<ActionsLog />} />
             <Route path="/settings" element={<Settings />} />

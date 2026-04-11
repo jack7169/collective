@@ -34,7 +34,7 @@ export function DirectoryHubCard({
     const dirA = peer.hubIsA ? hub.directory : peer.directory;
     const dirB = peer.hubIsA ? peer.directory : hub.directory;
     navigate(
-      `/scans/${scanId}/compare?a=${encodeURIComponent(dirA)}&b=${encodeURIComponent(dirB)}`
+      `/scans/${scanId}/assimilate?a=${encodeURIComponent(dirA)}&b=${encodeURIComponent(dirB)}`
     );
   };
 

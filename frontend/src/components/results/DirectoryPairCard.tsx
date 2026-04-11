@@ -28,7 +28,7 @@ export function DirectoryPairCard({
 
   const handleCardClick = () => {
     navigate(
-      `/scans/${scanId}/compare?a=${encodeURIComponent(pair.dir_a)}&b=${encodeURIComponent(pair.dir_b)}`
+      `/scans/${scanId}/assimilate?a=${encodeURIComponent(pair.dir_a)}&b=${encodeURIComponent(pair.dir_b)}`
     );
   };
 
@@ -61,7 +61,7 @@ export function DirectoryPairCard({
           </span>
         </div>
         <span className="text-xs text-muted-foreground">
-          Click to compare →
+          Click to assimilate →
         </span>
       </div>
 

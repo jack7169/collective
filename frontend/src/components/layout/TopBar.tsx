@@ -44,9 +44,6 @@ function getBreadcrumbs(pathname: string, scanName?: string): { label: string; p
     } else if (parts[2] === "similar") {
       crumbs.push({ label, path: `/scans/${scanId}` });
       crumbs.push({ label: "Similar Directories", path: pathname });
-    } else if (parts[2] === "compare") {
-      crumbs.push({ label, path: `/scans/${scanId}` });
-      crumbs.push({ label: "Compare", path: pathname });
     } else if (parts[2] === "assimilate") {
       crumbs.push({ label, path: `/scans/${scanId}` });
       crumbs.push({ label: "Assimilate", path: pathname });
