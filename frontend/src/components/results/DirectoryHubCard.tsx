@@ -58,16 +58,16 @@ export function DirectoryHubCard({
       {/* Hub header */}
       <div
         className={cn(
-          "p-4 border-b border-border",
+          "p-5 border-b border-border",
           isTagged && "bg-success/5"
         )}
       >
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-6">
           <div className="flex-1 min-w-0">
             <div className="font-mono text-sm text-foreground break-all leading-relaxed">
               {hub.directory}
             </div>
-            <div className="flex gap-4 mt-2 text-[11px] text-muted-foreground">
+            <div className="flex gap-5 mt-3 text-xs text-muted-foreground">
               <span>{formatNumber(hub.fileCount)} files</span>
               <span>{formatBytes(hub.totalSize)}</span>
               <span className="text-destructive font-medium">
@@ -120,7 +120,7 @@ export function DirectoryHubCard({
       </div>
 
       {/* Summary line */}
-      <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border">
+      <div className="px-5 py-3 text-xs text-muted-foreground border-b border-border">
         Overlaps with{" "}
         <strong className="text-foreground">
           {hub.peers.length} director{hub.peers.length === 1 ? "y" : "ies"}
@@ -144,16 +144,16 @@ export function DirectoryHubCard({
             >
               {/* Main peer row */}
               <div
-                className="px-4 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors"
+                className="px-5 py-3.5 cursor-pointer hover:bg-accent/50 transition-colors"
                 onClick={() => handlePeerClick(peer)}
               >
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-3">
                   <SimilarityBadge value={peer.similarity} />
                   {peer.relationship && (
                     <Badge
                       variant="outline"
                       className={cn(
-                        "text-[10px] capitalize",
+                        "text-xs capitalize",
                         getRelationshipBgColor(peer.relationship)
                       )}
                     >
@@ -163,12 +163,12 @@ export function DirectoryHubCard({
                   <span className="font-mono text-xs text-foreground break-all flex-1">
                     {peer.directory}
                   </span>
-                  <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
                     {formatBytes(peer.sharedSize)} shared
                   </span>
-                  <span className="text-muted-foreground text-[10px]">→</span>
+                  <span className="text-muted-foreground text-xs">→</span>
                 </div>
-                <div className="flex gap-4 mt-1 ml-16 text-[10px] text-muted-foreground">
+                <div className="flex gap-5 mt-2 ml-16 text-xs text-muted-foreground">
                   <span>
                     {formatNumber(peer.peerFileCount)} files ·{" "}
                     {formatBytes(peer.peerSize)}
@@ -193,22 +193,22 @@ export function DirectoryHubCard({
 
               {/* Exploded network */}
               {peerExploded.length > 0 && (
-                <div className="px-4 pb-2" onClick={(e) => e.stopPropagation()}>
+                <div className="px-5 pb-3" onClick={(e) => e.stopPropagation()}>
                   <button
-                    className="flex items-center gap-1.5 text-[10px] text-primary hover:text-primary/80"
+                    className="flex items-center gap-2 text-xs text-primary hover:text-primary/80"
                     onClick={() => toggleExploded(peer.directory)}
                   >
-                    <Network className="h-3 w-3" />
+                    <Network className="h-3.5 w-3.5" />
                     {isExpanded ? "Hide" : "Also overlaps with"}{" "}
                     {peerExploded.length} other director
                     {peerExploded.length === 1 ? "y" : "ies"}
                   </button>
                   {isExpanded && (
-                    <div className="mt-1.5 ml-4 p-2 bg-primary/5 border border-dashed border-primary/20 rounded-md">
+                    <div className="mt-2 ml-5 p-3 bg-primary/5 border border-dashed border-primary/20 rounded-md space-y-1.5">
                       {peerExploded.map((ep) => (
                         <div
                           key={ep.directory}
-                          className="flex items-center gap-2 py-1 text-[10px]"
+                          className="flex items-center gap-3 py-1 text-xs"
                         >
                           <SimilarityBadge value={ep.similarity} />
                           <span className="font-mono text-muted-foreground truncate">

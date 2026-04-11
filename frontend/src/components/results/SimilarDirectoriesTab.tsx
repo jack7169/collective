@@ -205,7 +205,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4">
           {hubs.map((hub) => (
             <DirectoryHubCard
               key={hub.directory}
