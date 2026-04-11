@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
 import {
-  Filter,
   FolderOpen,
   Loader2,
 } from "lucide-react";
@@ -10,7 +9,6 @@ import {
   useTaggedOriginals,
 } from "@/api/results";
 import type { DirectorySimilarityFilters } from "@/api/types";
-import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -18,12 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { DirectoryHubCard } from "@/components/results/DirectoryHubCard";
 import { TagMoveDialog } from "@/components/results/TagMoveDialog";
 import {
@@ -41,13 +33,12 @@ interface SimilarDirectoriesTabProps {
 }
 
 export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
-  const [minSimilarity, setMinSimilarity] = useState(30);
   const [sortBy, setSortBy] = useState<SortField>("reclaimable");
   const [relationship, setRelationship] = useState<string>("all");
 
   // Fetch ALL pairs at once for client-side hub grouping
   const filters: DirectorySimilarityFilters = {
-    min_similarity: minSimilarity,
+    min_similarity: 10,
     sort_by: "impact",
     sort_order: "desc",
     relationship: relationship === "all" ? undefined : relationship,
@@ -111,85 +102,49 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
 
   return (
     <div className="space-y-6">
-      {/* Filter bar */}
-      <Card>
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm">Filters</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 sm:grid-cols-3">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">
-                  Similarity Threshold
-                </label>
-                <span className="text-sm font-mono text-primary">
-                  {minSimilarity}%
-                </span>
-              </div>
-              <Slider
-                value={[minSimilarity]}
-                onValueChange={([v]) => setMinSimilarity(v ?? 30)}
-                min={0}
-                max={100}
-                step={5}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Slide right to focus on high-confidence matches
-              </p>
-            </div>
+      {/* Toolbar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Select
+            value={sortBy}
+            onValueChange={(v) => setSortBy(v as SortField)}
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="reclaimable">Sort by Reclaimable</SelectItem>
+              <SelectItem value="peers">Sort by Peer Count</SelectItem>
+              <SelectItem value="size">Sort by Size</SelectItem>
+            </SelectContent>
+          </Select>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Sort By</label>
-              <Select
-                value={sortBy}
-                onValueChange={(v) => setSortBy(v as SortField)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="reclaimable">Reclaimable</SelectItem>
-                  <SelectItem value="peers">Peer Count</SelectItem>
-                  <SelectItem value="size">Directory Size</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Relationship</label>
-              <Select
-                value={relationship}
-                onValueChange={setRelationship}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="exact">Exact</SelectItem>
-                  <SelectItem value="subset">Subset</SelectItem>
-                  <SelectItem value="superset">Superset</SelectItem>
-                  <SelectItem value="overlap">Overlap</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {data && (
-        <div className="text-sm text-muted-foreground">
-          {formatNumber(hubs.length)} directory hubs ·{" "}
-          {formatNumber(pairs.length)} pairs at {minSimilarity}%+ ·{" "}
-          <span className="text-destructive font-medium">
-            ~{formatBytes(totalReclaimable)} reclaimable
-          </span>
+          <Select
+            value={relationship}
+            onValueChange={setRelationship}
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="exact">Exact</SelectItem>
+              <SelectItem value="subset">Subset</SelectItem>
+              <SelectItem value="superset">Superset</SelectItem>
+              <SelectItem value="overlap">Overlap</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      )}
+
+        {data && (
+          <span className="text-sm text-muted-foreground">
+            {formatNumber(hubs.length)} hubs ·{" "}
+            <span className="text-destructive font-medium">
+              ~{formatBytes(totalReclaimable)} reclaimable
+            </span>
+          </span>
+        )}
+      </div>
 
       {/* Hub cards */}
       {isLoading ? (
@@ -201,7 +156,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
         <div className="flex flex-col items-center justify-center py-12">
           <FolderOpen className="h-12 w-12 text-muted-foreground/50 mb-4" />
           <p className="text-muted-foreground">
-            No similar directories at {minSimilarity}% threshold
+            No similar directories found
           </p>
         </div>
       ) : (
