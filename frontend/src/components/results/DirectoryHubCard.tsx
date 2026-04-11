@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, ChevronDown } from "lucide-react";
+import { Shield, ChevronDown, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SimilarityBadge } from "@/components/common/SimilarityBadge";
@@ -154,17 +154,26 @@ export function DirectoryHubCard({
                       {peer.relationship.replace("_", " ")}
                     </Badge>
                   )}
-                  {peerExploded.length > 0 && (
-                    <Badge variant="secondary" className="text-[10px]">
-                      {peerExploded.length} exploded connection{peerExploded.length > 1 ? "s" : ""}
-                    </Badge>
-                  )}
                   <span className="font-mono text-xs text-foreground break-all flex-1">
                     {peer.directory}
                   </span>
                   <span className="text-xs text-muted-foreground whitespace-nowrap">
                     {formatBytes(peer.sharedSize)} shared
                   </span>
+                  {peerExploded.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                      title={peerExploded.map((ep) => ep.directory).join("\n")}
+                    >
+                      <Network className="h-3.5 w-3.5" />
+                      {peerExploded.length} connection{peerExploded.length > 1 ? "s" : ""}
+                    </Button>
+                  )}
                   <span className="text-muted-foreground text-xs">→</span>
                 </div>
                 <div className="flex gap-5 mt-2 ml-16 text-xs text-muted-foreground">
