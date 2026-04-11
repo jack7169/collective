@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Trash2,
   BookmarkPlus,
@@ -40,6 +40,8 @@ export function ScanResults() {
   const scanExists = !!scan;
   const { data: stats } = useScanStats(scanExists ? id : undefined);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") ?? "overview";
   const deleteScan = useDeleteScan();
   const saveFromScan = useSaveFromScan();
   const resumeScan = useResumeScan();
@@ -137,7 +139,7 @@ export function ScanResults() {
         </div>
       )}
 
-      <Tabs defaultValue="overview" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={(v) => setSearchParams({ tab: v }, { replace: true })} className="space-y-6">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="groups">
