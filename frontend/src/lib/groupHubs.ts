@@ -78,10 +78,24 @@ export function buildAdjacency(
 export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
   if (!pairs.length) return [];
 
-  // Filter: prefer rollup pairs, suppress leaf pairs covered by a rollup
+  // Filter out noise:
+  // 1. Sibling pairs (same parent on both sides) — these are intra-directory
+  //    overlap, not cross-directory duplication. E.g. MobileSync ↔ Backup
+  //    under the same Itunes folder share iPhone data but aren't duplicates.
+  // 2. Leaf pairs covered by a rollup parent.
   const rollups = pairs.filter((p) => p.is_rollup);
   const filteredPairs = pairs.filter((pair) => {
     if (pair.is_rollup) return true;
+
+    // Suppress sibling pairs (same parent directory on both sides)
+    const idxA = pair.dir_a.lastIndexOf("/");
+    const idxB = pair.dir_b.lastIndexOf("/");
+    if (idxA > 0 && idxB > 0) {
+      const pA = pair.dir_a.slice(0, idxA);
+      const pB = pair.dir_b.slice(0, idxB);
+      if (pA === pB) return false;
+    }
+
     // Suppress this leaf if a rollup covers it
     return !rollups.some(
       (r) =>
