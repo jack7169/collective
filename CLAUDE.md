@@ -47,7 +47,7 @@ frontend/
   src/
     api/         # HTTP client, types, React Query hooks, WebSocket
     components/  # UI (shadcn/Radix), layout, results, common, scan
-    hooks/       # Custom hooks (useActionQueue, useGroupSelection, useBrowse)
+    hooks/       # Custom hooks (useKeeperSelection, useActionQueue, useBrowse)
     lib/         # Utilities (format, colors, utils)
     pages/       # Route pages (Dashboard, NewScan, ScanResults, etc.)
 ```
@@ -63,7 +63,14 @@ frontend/
 
 ## Key Patterns
 - Scan lifecycle: pending → running → parsing → analyzing → completed/failed/cancelled
+- Completed scans auto-save as SavedScan configurations
 - Action lifecycle: planned → dry_run → confirmed → executing → completed/failed
 - WebSocket at /api/scans/{id}/ws for live scan progress
 - Results paginated via PaginatedResponse schema
 - Directory similarity uses Jaccard coefficient on file checksums
+- Duplicate Groups use "Pick the Keeper" sandbox model (useKeeperSelection hook)
+- Similar Directories use card-based layout with inline tagging (DirectoryPairCard)
+- Smart suggestions via POST /api/scans/{id}/suggest-keepers (path pattern detection)
+- Compare view uses server-side caching (_compare_cache, _tree_cache) for instant revisits
+- ScanResults tab state persisted in URL via ?tab= search param
+- Tree-diff auto-collapses uniform-status folders for cleaner display

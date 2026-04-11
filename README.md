@@ -5,13 +5,13 @@ Duplicate file detection and directory consolidation tool for Unraid and Docker.
 ## Features
 
 - **Multi-engine scanning** — supports [fclones](https://github.com/pkolaczk/fclones) (default, multi-threaded) and [rmlint](https://rmlint.readthedocs.io/) (native directory detection)
-- **Grouped duplicate view** — Czkawka-style interface with checkboxes, smart selection (keep oldest/newest), and bulk actions
-- **Directory similarity analysis** — Jaccard similarity scoring with adjustable thresholds, relationship classification (exact, subset, superset, overlap)
-- **Side-by-side comparison** — tree diff view for directory pairs with color-coded status
-- **Post-scan tagging** — mark "keeper" directories to reclassify originals vs duplicates
-- **Action queue** — batch file operations (delete, hardlink, symlink, move, merge) with dry-run preview
+- **Pick the Keeper** — one-click sandbox model for resolving duplicate groups. Pick which copy to keep, all others are marked for deletion. Smart suggestions learn from your path preferences after 3+ decisions.
+- **Directory similarity analysis** — card-based view with full directory paths, inline "Mark as Original" tagging, differences dropdown with date analysis and merge/version verdicts
+- **Side-by-side comparison** — progressive-loading tree diff with smart folder collapsing, cached for instant revisits
+- **Review & Apply** — two-column review popup showing files being kept vs deleted, grouped by directory, before committing changes to disk
+- **Auto-save scans** — completed scans automatically saved as reusable configurations
 - **Saved scans** — persistent scan configurations with optional scheduling
-- **Real-time progress** — WebSocket-based live updates during scanning
+- **Real-time progress** — WebSocket-based live updates during scanning with elapsed timers
 - **Dark mode** — full dark theme optimized for media server environments
 
 ## Quick Start
@@ -111,7 +111,7 @@ Docker (supervisord: fastapi + huey + scheduler)
 
 ## Tech Stack
 
-**Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Radix UI, TanStack Query, Recharts
+**Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query
 
 **Backend**: FastAPI, SQLAlchemy 2.0 (async), Alembic, Huey, SQLite
 
