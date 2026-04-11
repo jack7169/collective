@@ -194,7 +194,7 @@ export function DifferencesDropdown({
   uniqueToB,
 }: DifferencesDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const hasAnyDifferences = uniqueToA > 0 || uniqueToB > 0;
+  const hasAnyDifferences = uniqueToA > 0;
 
   // Only fetch comparison data when dropdown is opened
   const { data: compare, isLoading } = useCompare(
