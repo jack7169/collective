@@ -22,16 +22,6 @@ from app.tasks.worker import huey
 logger = logging.getLogger(__name__)
 
 
-def _update_progress(session: Session, scan_id: int, **kwargs):
-    """Update scan progress fields."""
-    scan = session.get(Scan, scan_id)
-    if scan:
-        for key, value in kwargs.items():
-            if hasattr(scan, key):
-                setattr(scan, key, value)
-        session.commit()
-
-
 @huey.task()
 def run_scan_task(scan_id: int):
     """Execute full scan pipeline synchronously (runs in Huey worker).
@@ -326,6 +316,7 @@ def run_scan_task(scan_id: int):
             total_files = 0
             total_size = 0
             duplicates = 0
+            space_recoverable = 0
             unique_dirs: set[str] = set()
 
             for result in backend.parse_output(output_path):
@@ -341,9 +332,10 @@ def run_scan_task(scan_id: int):
                     ))
                     total_files += 1
                     total_size += result.size
-                    unique_dirs.add(os.path.dirname(result.path))
+                    unique_dirs.add(result.path.rsplit("/", 1)[0] if "/" in result.path else "")
                     if not result.is_original:
                         duplicates += 1
+                        space_recoverable += result.size
                 elif isinstance(result, DuplicateDirResult):
                     dir_records.append(DuplicateDirectory(
                         scan_id=scan_id,
@@ -355,25 +347,21 @@ def run_scan_task(scan_id: int):
                     ))
                     unique_dirs.add(result.path)
 
-            # Bulk insert in batches
-            batch_size = 1000
+            # Bulk insert in batches (5000 rows per flush for SQLite performance)
+            batch_size = 5000
             for i in range(0, len(file_records), batch_size):
                 session.add_all(file_records[i:i + batch_size])
                 session.flush()
-
             for i in range(0, len(dir_records), batch_size):
                 session.add_all(dir_records[i:i + batch_size])
                 session.flush()
-
             session.commit()
 
             scan.total_files = total_files
             scan.total_dirs = len(unique_dirs)
             scan.total_size = total_size
             scan.duplicates_found = duplicates
-            scan.space_recoverable = sum(
-                r.size for r in file_records if not r.is_original
-            )
+            scan.space_recoverable = space_recoverable
 
         # Analysis phase — clear old similarities if resuming
         scan.status = "analyzing"
@@ -509,13 +497,12 @@ def _compute_similarities_sync(
     """Synchronous version of similarity computation for Huey worker."""
     from collections import defaultdict
 
-    # Stream duplicate files — fetch only needed columns, never load all rows at once
+    # Fetch only needed columns (path, checksum, size) — not full ORM objects
     stmt = (
         select(DuplicateFile.path, DuplicateFile.checksum, DuplicateFile.size)
         .where(DuplicateFile.scan_id == scan_id)
     )
-    result = session.execute(stmt)
-    rows = result.fetchall()
+    rows = session.execute(stmt).all()
 
     if not rows:
         return 0
@@ -526,7 +513,7 @@ def _compute_similarities_sync(
     dir_total_size: dict[str, int] = defaultdict(int)
 
     for path, checksum, size in rows:
-        parent = os.path.dirname(path)
+        parent = path.rsplit("/", 1)[0] if "/" in path else ""
         if depth is not None and depth > 0:
             parts = parent.rstrip("/").split("/")
             if len(parts) > depth + 1:
@@ -573,10 +560,14 @@ def _compute_similarities_sync(
 
     # Compute similarity metrics for pairs that meet the threshold
     all_results = []
+    # Pre-cache set sizes for O(1) lookup instead of O(n) set union per pair
+    dir_checksum_counts = {d: len(cs) for d, cs in dir_checksums.items()}
+
     for (dir_a, dir_b), shared_count in pair_shared_count.items():
-        checksums_a = dir_checksums[dir_a]
-        checksums_b = dir_checksums[dir_b]
-        union_count = len(checksums_a | checksums_b)
+        count_a = dir_checksum_counts.get(dir_a, 0)
+        count_b = dir_checksum_counts.get(dir_b, 0)
+        # |A ∪ B| = |A| + |B| - |A ∩ B|
+        union_count = count_a + count_b - shared_count
         if not union_count:
             continue
 
@@ -584,8 +575,8 @@ def _compute_similarities_sync(
         if jaccard < threshold:
             continue
 
-        a_subset_pct = (shared_count / len(checksums_a)) * 100.0 if checksums_a else 0.0
-        b_subset_pct = (shared_count / len(checksums_b)) * 100.0 if checksums_b else 0.0
+        a_subset_pct = (shared_count / count_a) * 100.0 if count_a else 0.0
+        b_subset_pct = (shared_count / count_b) * 100.0 if count_b else 0.0
         shared_size = pair_shared_size[(dir_a, dir_b)]
 
         if jaccard >= 99.0:
@@ -599,15 +590,15 @@ def _compute_similarities_sync(
 
         all_results.append({
             "dir_a": dir_a, "dir_b": dir_b,
-            "files_a": len(checksums_a), "files_b": len(checksums_b),
+            "files_a": count_a, "files_b": count_b,
             "shared_files": shared_count, "shared_size": shared_size,
             "size_a": dir_total_size.get(dir_a, 0),
             "size_b": dir_total_size.get(dir_b, 0),
             "jaccard_similarity": round(jaccard, 2),
             "a_subset_pct": round(a_subset_pct, 2),
             "b_subset_pct": round(b_subset_pct, 2),
-            "unique_to_a": len(checksums_a) - shared_count,
-            "unique_to_b": len(checksums_b) - shared_count,
+            "unique_to_a": count_a - shared_count,
+            "unique_to_b": count_b - shared_count,
             "relationship": relationship,
         })
 
