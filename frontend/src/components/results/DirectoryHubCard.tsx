@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, ChevronDown, Network } from "lucide-react";
+import { Shield, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SimilarityBadge } from "@/components/common/SimilarityBadge";
@@ -28,17 +28,7 @@ export function DirectoryHubCard({
   explodedPeers,
 }: DirectoryHubCardProps) {
   const navigate = useNavigate();
-  const [expandedPeers, setExpandedPeers] = useState<Set<string>>(new Set());
   const [showDropdown, setShowDropdown] = useState(false);
-
-  const toggleExploded = (peerDir: string) => {
-    setExpandedPeers((prev) => {
-      const next = new Set(prev);
-      if (next.has(peerDir)) next.delete(peerDir);
-      else next.add(peerDir);
-      return next;
-    });
-  };
 
   const handlePeerClick = (peer: PeerEntry) => {
     const dirA = peer.hubIsA ? hub.directory : peer.directory;
@@ -135,7 +125,6 @@ export function DirectoryHubCard({
           const dirA = peer.hubIsA ? hub.directory : peer.directory;
           const dirB = peer.hubIsA ? peer.directory : hub.directory;
           const peerExploded = explodedPeers.get(peer.directory) ?? [];
-          const isExpanded = expandedPeers.has(peer.directory);
 
           return (
             <div
@@ -146,6 +135,14 @@ export function DirectoryHubCard({
               <div
                 className="px-5 py-3.5 cursor-pointer hover:bg-accent/50 transition-colors"
                 onClick={() => handlePeerClick(peer)}
+                title={[
+                  peer.uniqueInHub === 0 && peer.uniqueInPeer === 0
+                    ? "Identical — no unique files on either side"
+                    : null,
+                  peerExploded.length > 0
+                    ? `Also overlaps with: ${peerExploded.map((ep) => ep.directory.split("/").pop()).join(", ")}`
+                    : null,
+                ].filter(Boolean).join("\n") || undefined}
               >
                 <div className="flex items-center gap-3">
                   <SimilarityBadge value={peer.similarity} />
@@ -191,38 +188,6 @@ export function DirectoryHubCard({
                 />
               </div>
 
-              {/* Exploded network */}
-              {peerExploded.length > 0 && (
-                <div className={cn("px-5 pb-3 transition-opacity", isExpanded ? "opacity-100" : "opacity-0 group-hover/peer:opacity-100")} onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className="flex items-center gap-2 text-xs text-primary hover:text-primary/80"
-                    onClick={() => toggleExploded(peer.directory)}
-                  >
-                    <Network className="h-3.5 w-3.5" />
-                    {isExpanded ? "Hide" : "Also overlaps with"}{" "}
-                    {peerExploded.length} other director
-                    {peerExploded.length === 1 ? "y" : "ies"}
-                  </button>
-                  {isExpanded && (
-                    <div className="mt-2 ml-5 p-3 bg-primary/5 border border-dashed border-primary/20 rounded-md space-y-1.5">
-                      {peerExploded.map((ep) => (
-                        <div
-                          key={ep.directory}
-                          className="flex items-center gap-3 py-1 text-xs"
-                        >
-                          <SimilarityBadge value={ep.similarity} />
-                          <span className="font-mono text-muted-foreground truncate">
-                            {ep.directory}
-                          </span>
-                          <span className="text-muted-foreground whitespace-nowrap">
-                            {formatBytes(ep.sharedSize)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           );
         })}
