@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   Filter,
   FolderOpen,
@@ -10,7 +10,6 @@ import {
   useTaggedOriginals,
 } from "@/api/results";
 import type { DirectorySimilarityFilters } from "@/api/types";
-import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import {
   Select,
@@ -25,19 +24,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { DirectoryPairCard } from "@/components/results/DirectoryPairCard";
-import { TagFloatingBar } from "@/components/results/TagFloatingBar";
-import { formatNumber } from "@/lib/format";
+import { DirectoryHubCard } from "@/components/results/DirectoryHubCard";
+import { TagMoveDialog } from "@/components/results/TagMoveDialog";
+import {
+  groupIntoHubs,
+  buildAdjacency,
+  getExplodedPeers,
+} from "@/lib/groupHubs";
+import { formatBytes, formatNumber } from "@/lib/format";
+import type { PeerEntry } from "@/lib/groupHubs";
 
-type SortField = "impact" | "similarity" | "size" | "files";
-type SortOrder = "asc" | "desc";
-
-const sortFieldToApi: Record<SortField, string> = {
-  impact: "impact",
-  similarity: "jaccard_similarity",
-  size: "shared_size",
-  files: "shared_files",
-};
+type SortField = "reclaimable" | "peers" | "size";
 
 interface SimilarDirectoriesTabProps {
   scanId: string;
@@ -45,54 +42,72 @@ interface SimilarDirectoriesTabProps {
 
 export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
   const [minSimilarity, setMinSimilarity] = useState(30);
-  const [sortBy, setSortBy] = useState<SortField>("impact");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [sortBy, setSortBy] = useState<SortField>("reclaimable");
   const [relationship, setRelationship] = useState<string>("all");
-  const [page, setPage] = useState(1);
 
-  // Tag state — using Set for O(1) lookups across all cards
-  const { data: tagData } = useTaggedOriginals(scanId);
-  const tagMutation = useTagOriginals(scanId);
-  const [taggedPaths, setTaggedPaths] = useState<Set<string>>(new Set());
-  const [tagsInitialized, setTagsInitialized] = useState(false);
-
-  // Initialize tagged paths from server (once)
-  const serverTags = tagData?.tagged_paths ?? [];
-  if (serverTags.length > 0 && !tagsInitialized) {
-    setTaggedPaths(new Set(serverTags));
-    setTagsInitialized(true);
-  }
-
+  // Fetch ALL pairs at once for client-side hub grouping
   const filters: DirectorySimilarityFilters = {
     min_similarity: minSimilarity,
-    sort_by: sortFieldToApi[sortBy],
-    sort_order: sortOrder,
+    sort_by: "impact",
+    sort_order: "desc",
     relationship: relationship === "all" ? undefined : relationship,
-    page,
-    per_page: 25,
+    per_page: 500,
   };
 
   const { data, isLoading } = useSimilarDirs(scanId, filters);
 
-  const handleToggleTag = useCallback((path: string) => {
-    setTaggedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
+  // Tag state
+  const { data: tagData } = useTaggedOriginals(scanId);
+  const tagMutation = useTagOriginals(scanId);
+  const taggedPaths = useMemo(
+    () => new Set(tagData?.tagged_paths ?? []),
+    [tagData]
+  );
+
+  // Tag & Move dialog state
+  const [tagMoveHub, setTagMoveHub] = useState<string | null>(null);
+
+  // Group pairs into hubs
+  const pairs = data?.items ?? [];
+  const hubs = useMemo(() => {
+    const grouped = groupIntoHubs(pairs);
+    if (sortBy === "peers") {
+      grouped.sort((a, b) => b.peers.length - a.peers.length);
+    } else if (sortBy === "size") {
+      grouped.sort((a, b) => b.totalSize - a.totalSize);
+    }
+    // "reclaimable" is the default from groupIntoHubs
+    return grouped;
+  }, [pairs, sortBy]);
+
+  // Build adjacency for exploded network lookups
+  const adjacency = useMemo(() => buildAdjacency(pairs), [pairs]);
+
+  const getExplodedForHub = useCallback(
+    (hubDir: string): Map<string, PeerEntry[]> => {
+      const map = new Map<string, PeerEntry[]>();
+      const hubPeers = adjacency.get(hubDir) ?? [];
+      for (const peer of hubPeers) {
+        const exploded = getExplodedPeers(peer.directory, hubDir, adjacency);
+        if (exploded.length > 0) {
+          map.set(peer.directory, exploded);
+        }
       }
-      return next;
-    });
-  }, []);
+      return map;
+    },
+    [adjacency]
+  );
 
-  const handleApplyTags = async () => {
-    await tagMutation.mutateAsync(Array.from(taggedPaths));
+  const handleTagMove = (hubDir: string) => {
+    setTagMoveHub(hubDir);
   };
 
-  const handleClearTags = () => {
-    setTaggedPaths(new Set());
+  const handleSkipMove = async (hubDir: string) => {
+    await tagMutation.mutateAsync([hubDir]);
   };
+
+  const tagMoveHubData = hubs.find((h) => h.directory === tagMoveHub);
+  const totalReclaimable = hubs.reduce((s, h) => s + h.totalReclaimable, 0);
 
   return (
     <div className="space-y-6">
@@ -117,10 +132,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
               </div>
               <Slider
                 value={[minSimilarity]}
-                onValueChange={([v]) => {
-                  setMinSimilarity(v ?? 30);
-                  setPage(1);
-                }}
+                onValueChange={([v]) => setMinSimilarity(v ?? 30)}
                 min={0}
                 max={100}
                 step={5}
@@ -134,19 +146,15 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
               <label className="text-sm font-medium">Sort By</label>
               <Select
                 value={sortBy}
-                onValueChange={(v) => {
-                  setSortBy(v as SortField);
-                  setPage(1);
-                }}
+                onValueChange={(v) => setSortBy(v as SortField)}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="impact">Impact</SelectItem>
-                  <SelectItem value="similarity">Similarity</SelectItem>
-                  <SelectItem value="size">Shared Size</SelectItem>
-                  <SelectItem value="files">File Count</SelectItem>
+                  <SelectItem value="reclaimable">Reclaimable</SelectItem>
+                  <SelectItem value="peers">Peer Count</SelectItem>
+                  <SelectItem value="size">Directory Size</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -155,10 +163,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
               <label className="text-sm font-medium">Relationship</label>
               <Select
                 value={relationship}
-                onValueChange={(v) => {
-                  setRelationship(v);
-                  setPage(1);
-                }}
+                onValueChange={setRelationship}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -169,7 +174,6 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
                   <SelectItem value="subset">Subset</SelectItem>
                   <SelectItem value="superset">Superset</SelectItem>
                   <SelectItem value="overlap">Overlap</SelectItem>
-                  <SelectItem value="structural_match">Structural</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -179,77 +183,56 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
 
       {data && (
         <div className="text-sm text-muted-foreground">
-          {formatNumber(data.total)} directory pairs at {minSimilarity}%+
+          {formatNumber(hubs.length)} directory hubs ·{" "}
+          {formatNumber(pairs.length)} pairs at {minSimilarity}%+ ·{" "}
+          <span className="text-destructive font-medium">
+            ~{formatBytes(totalReclaimable)} reclaimable
+          </span>
         </div>
       )}
 
-      {/* Card list */}
+      {/* Hub cards */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin mr-2" />
           Loading...
         </div>
-      ) : !data?.items || data.items.length === 0 ? (
+      ) : hubs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12">
           <FolderOpen className="h-12 w-12 text-muted-foreground/50 mb-4" />
           <p className="text-muted-foreground">
             No similar directories at {minSimilarity}% threshold
           </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Try lowering the similarity threshold
-          </p>
         </div>
       ) : (
-        <>
-          <div className="flex flex-col gap-3">
-            {data.items.map((pair) => (
-              <DirectoryPairCard
-                key={pair.id}
-                pair={pair}
-                scanId={scanId}
-                taggedPaths={taggedPaths}
-                onToggleTag={handleToggleTag}
-              />
-            ))}
-          </div>
-
-          {data.pages > 1 && (
-            <div className="flex items-center justify-between pt-4 border-t border-border">
-              <span className="text-sm text-muted-foreground">
-                Page {data.page} of {data.pages} (
-                {formatNumber(data.total)} pairs)
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => p - 1)}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= data.pages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
-        </>
+        <div className="flex flex-col gap-3">
+          {hubs.map((hub) => (
+            <DirectoryHubCard
+              key={hub.directory}
+              hub={hub}
+              scanId={scanId}
+              isTagged={taggedPaths.has(hub.directory)}
+              onTagMove={handleTagMove}
+              onSkipMove={handleSkipMove}
+              explodedPeers={getExplodedForHub(hub.directory)}
+            />
+          ))}
+        </div>
       )}
 
-      {/* Floating tag bar */}
-      <TagFloatingBar
-        taggedPaths={taggedPaths}
-        onClear={handleClearTags}
-        onApply={handleApplyTags}
-        isPending={tagMutation.isPending}
-        result={tagMutation.isSuccess ? tagMutation.data : null}
-      />
+      {/* Tag & Move Dialog */}
+      {tagMoveHubData && (
+        <TagMoveDialog
+          open={tagMoveHub !== null}
+          onOpenChange={(open) => {
+            if (!open) setTagMoveHub(null);
+          }}
+          scanId={scanId}
+          hubDirectory={tagMoveHubData.directory}
+          peers={tagMoveHubData.peers}
+          totalReclaimable={tagMoveHubData.totalReclaimable}
+        />
+      )}
     </div>
   );
 }
