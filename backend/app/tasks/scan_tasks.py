@@ -76,11 +76,11 @@ def run_scan_task(scan_id: int):
         # Update status immediately so the UI reflects that work has started
         if skip_scanner and skip_parsing:
             scan.status = "analyzing"
-            scan.progress_percent = 80.0
+            scan.progress_percent = 85.0
             scan.progress_message = "Resuming similarity analysis..."
         elif skip_scanner:
             scan.status = "parsing"
-            scan.progress_percent = 50.0
+            scan.progress_percent = 60.0
             scan.progress_message = "Resuming — re-parsing scanner output..."
         else:
             scan.status = "running"
@@ -236,7 +236,10 @@ def run_scan_task(scan_id: int):
                     progress = backend.parse_progress(line)
                     if progress:
                         if progress.percent is not None:
-                            scan.progress_percent = progress.percent
+                            # Map scanner percent to 0-60% range, never decrease
+                            mapped = progress.percent * 0.6
+                            if mapped > scan.progress_percent:
+                                scan.progress_percent = round(mapped, 1)
                         if progress.total_files is not None:
                             scan.total_files = progress.total_files
                         if progress.total_dirs is not None:
@@ -303,7 +306,7 @@ def run_scan_task(scan_id: int):
             return
 
         if not skip_parsing:
-            # Parsing phase
+            # Parsing phase (60-85% of overall progress)
             scan.status = "parsing"
             scan.progress_percent = 60.0
             scan.progress_message = "Parsing scanner output..."
@@ -335,6 +338,11 @@ def run_scan_task(scan_id: int):
             space_recoverable = 0
             unique_dirs: set[str] = set()
 
+            # Get output file size for parsing progress estimation
+            output_file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            bytes_parsed = 0
+            last_progress_update = time.time()
+
             for result in backend.parse_output(output_path):
                 if isinstance(result, DuplicateFileResult):
                     file_records.append(DuplicateFile(
@@ -363,14 +371,40 @@ def run_scan_task(scan_id: int):
                     ))
                     unique_dirs.add(result.path)
 
+                # Update parsing progress every 2 seconds (60-70% range)
+                now = time.time()
+                if now - last_progress_update >= 2:
+                    # Estimate parse progress from record count (parsing phase = 60-70%)
+                    scan.progress_percent = 60.0 + min(10.0, total_files / max(1, total_files + 1000) * 10.0)
+                    scan.progress_message = f"Parsing... {total_files:,} files found"
+                    scan.total_files = total_files
+                    scan.duplicates_found = duplicates
+                    session.commit()
+                    last_progress_update = now
+
             # Bulk insert in batches (5000 rows per flush for SQLite performance)
+            # Insert phase = 70-85% range
             batch_size = 5000
+            total_to_insert = len(file_records) + len(dir_records)
+            inserted = 0
+            last_progress_update = time.time()
+
             for i in range(0, len(file_records), batch_size):
                 session.add_all(file_records[i:i + batch_size])
                 session.flush()
+                inserted += min(batch_size, len(file_records) - i)
+                now = time.time()
+                if now - last_progress_update >= 2:
+                    insert_pct = inserted / max(1, total_to_insert)
+                    scan.progress_percent = round(70.0 + insert_pct * 15.0, 1)
+                    scan.progress_message = f"Inserting records... {inserted:,} / {total_to_insert:,}"
+                    session.commit()
+                    last_progress_update = now
+
             for i in range(0, len(dir_records), batch_size):
                 session.add_all(dir_records[i:i + batch_size])
                 session.flush()
+                inserted += min(batch_size, len(dir_records) - i)
             session.commit()
 
             scan.total_files = total_files
@@ -379,9 +413,9 @@ def run_scan_task(scan_id: int):
             scan.duplicates_found = duplicates
             scan.space_recoverable = space_recoverable
 
-        # Analysis phase — clear old similarities if resuming
+        # Analysis phase (85-100%) — clear old similarities if resuming
         scan.status = "analyzing"
-        scan.progress_percent = 80.0
+        scan.progress_percent = 85.0
         scan.progress_message = "Computing directory similarities..."
         session.execute(
             delete(DirectorySimilarity).where(DirectorySimilarity.scan_id == scan_id)

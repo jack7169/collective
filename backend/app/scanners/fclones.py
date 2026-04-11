@@ -1,11 +1,12 @@
+"""fclones scanner backend."""
 import json
 import logging
-import multiprocessing
 import os
 import re
 from typing import Iterator, Optional
 
 from app.scanners.base import (
+    DuplicateDirResult,
     DuplicateFileResult,
     ScannerBackend,
     ScanProgressInfo,
@@ -13,16 +14,28 @@ from app.scanners.base import (
 
 logger = logging.getLogger(__name__)
 
+# Precompiled regexes for progress parsing
+_RE_ANSI = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+_RE_ANSI2 = re.compile(r"\x1b\[\?[0-9]*[a-zA-Z]")
+# Match: "6/6: Grouping by contents  [====>  ]  9.8 GB / 97.8 GB"
+_RE_BYTE_PROGRESS = re.compile(
+    r"(\d+)/(\d+):\s*(.+?)\s*\[.*?\]\s*([\d.]+)\s*(B|KB|MB|GB|TB)\s*/\s*([\d.]+)\s*(B|KB|MB|TB)"
+)
+# Match: "1/6: Scanning files  [<===>  ]  12345"
+_RE_STEP_COUNT = re.compile(r"(\d+)/(\d+):\s*(.+?)\s*\[.*?\]\s*(\d+)")
+# Match: "1/6: Scanning files"
+_RE_STEP_ONLY = re.compile(r"(\d+)/(\d+):\s*(.+)")
+# Match fclones info log lines
+_RE_INFO = re.compile(r"fclones:\s*\w+:\s*(.+)")
 
-def _parse_size_string(size_str: str) -> Optional[int]:
-    """Parse a human-readable size string like '28.2 GB' into bytes."""
-    match = re.match(r"([\d.]+)\s*([KMGTP]?i?B?)", size_str.strip(), re.IGNORECASE)
-    if not match:
-        return None
-    value = float(match.group(1))
-    unit = match.group(2).upper().replace("I", "").rstrip("B")
-    multipliers = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
-    return int(value * multipliers.get(unit, 1))
+_SIZE_MULTIPLIERS = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
+
+
+def _parse_size_string(s: str) -> int:
+    m = re.match(r"([\d.]+)\s*(B|KB|MB|GB|TB)", s.strip(), re.IGNORECASE)
+    if m:
+        return int(float(m.group(1)) * _SIZE_MULTIPLIERS.get(m.group(2).upper(), 1))
+    return 0
 
 
 class FclonesBackend(ScannerBackend):
@@ -33,171 +46,150 @@ class FclonesBackend(ScannerBackend):
         extra_flags: Optional[dict],
         output_path: str,
     ) -> list[str]:
-        cmd = [
-            "fclones",
-            "group",
-        ]
-
-        all_paths = list(target_paths)
-        if tagged_paths:
-            all_paths.extend(tagged_paths)
-
-        cmd.extend(all_paths)
-        cmd.extend([
-            "--cache",
-            "--min", "4096",        # Skip tiny files (<4KB)
-            "-f", "json",
-            "-o", output_path,
-        ])
-
-        # Set thread pool to use all cores (fclones default is conservative)
-        ncpu = multiprocessing.cpu_count()
-        cmd.extend(["--threads", f"default:{ncpu},{ncpu}"])
-
-        if len(all_paths) > 1:
-            cmd.append("--isolate")
+        cmd = ["fclones", "group"]
+        cmd.extend(target_paths)
+        cmd.extend(["--format", "json", "-o", output_path])
 
         if extra_flags:
-            for key, value in extra_flags.items():
-                if value is True:
-                    cmd.append(f"--{key}")
-                elif value is not False and value is not None:
-                    cmd.extend([f"--{key}", str(value)])
+            min_size = extra_flags.get("min_size")
+            if min_size:
+                cmd.extend(["--min", str(min_size)])
+            max_size = extra_flags.get("max_size")
+            if max_size:
+                cmd.extend(["--max", str(max_size)])
+            exclude = extra_flags.get("exclude_patterns", [])
+            for pattern in exclude:
+                cmd.extend(["--exclude", pattern])
+            depth = extra_flags.get("depth")
+            if depth:
+                cmd.extend(["--depth", str(depth)])
 
+        # Always use cache for faster re-scans
+        cmd.append("--cache")
         return cmd
 
-    def parse_output(self, output_path: str) -> Iterator[DuplicateFileResult]:
-        try:
-            with open(output_path, "r") as f:
+    def parse_output(self, output_path: str) -> Iterator[DuplicateFileResult | DuplicateDirResult]:
+        with open(output_path) as f:
+            try:
                 data = json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            logger.error("Failed to parse fclones output at %s: %s", output_path, e)
-            return
+            except json.JSONDecodeError:
+                logger.error("Failed to parse fclones output: %s", output_path)
+                return
 
-        if isinstance(data, dict):
-            groups = data.get("groups", data.get("duplicates", []))
-        elif isinstance(data, list):
-            groups = data
-        else:
-            logger.error("Unexpected fclones output format")
-            return
+        header = data.get("header", {})
+        groups = data.get("groups", []) if isinstance(data, dict) else data
 
         for group_idx, group in enumerate(groups):
-            group_id = f"fclones_{group_idx}"
-
-            if isinstance(group, dict):
-                files = group.get("files", group.get("paths", []))
-                checksum = group.get("file_hash", group.get("hash", group.get("checksum", f"group_{group_idx}")))
-                file_size = group.get("file_len", group.get("size", 0))
-            elif isinstance(group, list):
-                files = group
-                checksum = f"group_{group_idx}"
-                file_size = 0
-            else:
+            files = group.get("files", [])
+            if not files:
                 continue
 
+            checksum = group.get("hash", f"group_{group_idx}")
+            file_size = group.get("file_len", 0)
+            group_id = f"g{group_idx}"
+
             for file_idx, file_entry in enumerate(files):
-                if isinstance(file_entry, dict):
-                    path = file_entry.get("path", file_entry.get("name", ""))
-                    size = file_entry.get("size", file_size)
-                    mtime = file_entry.get("mtime", None)
-                elif isinstance(file_entry, str):
-                    path = file_entry
-                    size = file_size
-                    mtime = None
-                else:
-                    continue
+                path = file_entry if isinstance(file_entry, str) else file_entry.get("path", "")
+                mtime = None
+                if isinstance(file_entry, dict) and "modified" in file_entry:
+                    try:
+                        from datetime import datetime
+                        mtime = datetime.fromisoformat(file_entry["modified"]).timestamp()
+                    except (ValueError, TypeError):
+                        pass
 
                 yield DuplicateFileResult(
-                    checksum=str(checksum),
+                    checksum=checksum,
                     path=path,
-                    size=size,
+                    size=file_size,
                     mtime=mtime,
                     is_original=(file_idx == 0),
                     group_id=group_id,
                 )
 
     def parse_progress(self, line: str) -> Optional[ScanProgressInfo]:
+        """Parse fclones progress output into structured progress info.
+
+        fclones has 6 steps. Steps 1-5 are near-instant. Step 6 (content
+        hashing) is where all the time goes and reports byte-level progress
+        like "6/6: Grouping by contents [====>] 9.8 GB / 97.8 GB".
+
+        We extract the byte ratio from step 6 for accurate progress, and
+        treat steps 1-5 as 0-5% of scanner progress.
+        """
         # Strip ANSI escape codes
-        line = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", line)
-        line = re.sub(r"\x1b\[\?[0-9]*[a-zA-Z]", "", line)
+        line = _RE_ANSI.sub("", line)
+        line = _RE_ANSI2.sub("", line)
         line = line.strip()
         if not line:
             return None
 
-        # fclones progress bar with bracket animation:
-        #   "01/6: Scanning files  [<===>  ]  12345"
-        step_bracket = re.match(
-            r"(\d+)/(\d+):\s*(.+?)\s*\[.*?\]\s*(\d+)", line
-        )
-        if step_bracket:
-            step = int(step_bracket.group(1))
-            total_steps = int(step_bracket.group(2))
-            phase = step_bracket.group(3).strip()
-            count = int(step_bracket.group(4))
-            pct = ((step - 1) / total_steps) * 100
+        # fclones often concatenates multiple progress updates on one line
+        # via carriage returns. Take the LAST step/progress on the line.
+        # Split on common step patterns and take the last meaningful one.
+        segments = re.split(r"(?=\d/\d+:)", line)
+        if len(segments) > 1:
+            # Use the last segment that looks like a step
+            line = segments[-1].strip()
+
+        # Priority 1: Byte-level progress (step 6 typically)
+        # "6/6: Grouping by contents  [====>  ]  9.8 GB / 97.8 GB"
+        byte_match = _RE_BYTE_PROGRESS.search(line)
+        if byte_match:
+            step = int(byte_match.group(1))
+            total_steps = int(byte_match.group(2))
+            phase = byte_match.group(3).strip()
+            current_bytes = float(byte_match.group(4)) * _SIZE_MULTIPLIERS.get(byte_match.group(5).upper(), 1)
+            total_bytes = float(byte_match.group(6)) * _SIZE_MULTIPLIERS.get(byte_match.group(7).upper(), 1)
+
+            if total_bytes > 0:
+                # Steps 1-5 get 0-5%, step 6 gets 5-100% based on bytes
+                byte_pct = current_bytes / total_bytes
+                if step == total_steps:
+                    pct = 5.0 + byte_pct * 95.0
+                else:
+                    pct = (step - 1) / total_steps * 5.0
+
+                current_str = f"{byte_match.group(4)} {byte_match.group(5)}"
+                total_str = f"{byte_match.group(6)} {byte_match.group(7)}"
+                return ScanProgressInfo(
+                    percent=round(pct, 1),
+                    message=f"Step {step}/{total_steps}: {phase} ({current_str} / {total_str})",
+                )
+
+        # Priority 2: Step with item count
+        # "1/6: Scanning files  [<===>  ]  12345"
+        step_match = _RE_STEP_COUNT.match(line)
+        if step_match:
+            step = int(step_match.group(1))
+            total_steps = int(step_match.group(2))
+            phase = step_match.group(3).strip()
+            count = int(step_match.group(4))
+            # Steps 1-5 are near-instant: map to 0-5%
+            pct = min(5.0, (step / total_steps) * 5.0)
             return ScanProgressInfo(
                 percent=round(pct, 1),
                 message=f"Step {step}/{total_steps}: {phase} ({count:,} items)",
-                total_files=count if step == 1 else None,
+                total_files=count if step <= 2 else None,
             )
 
-        # fclones progress after bracket stripping — raw format becomes:
-        #   "1461939  1/6: Scanning files" (count + whitespace + step)
-        # or just "1/6: Scanning files   12345" (step first, count at end)
-        # Handle: count then step/total
-        count_step = re.match(r"(\d+)\s+(\d+)/(\d+):\s*(.+)", line)
-        if count_step:
-            count = int(count_step.group(1))
-            step = int(count_step.group(2))
-            total_steps = int(count_step.group(3))
-            phase = count_step.group(4).strip()
-            pct = ((step - 1) / total_steps) * 100
-            return ScanProgressInfo(
-                percent=round(pct, 1),
-                message=f"Step {step}/{total_steps}: {phase} ({count:,} items)",
-                total_files=count if step == 1 else None,
-            )
-
-        # Handle: step/total then text then count at end
-        step_count = re.match(r"(\d+)/(\d+):\s*(.+?)\s+(\d{3,})\s*$", line)
-        if step_count:
-            step = int(step_count.group(1))
-            total_steps = int(step_count.group(2))
-            phase = step_count.group(3).strip()
-            count = int(step_count.group(4))
-            pct = ((step - 1) / total_steps) * 100
-            return ScanProgressInfo(
-                percent=round(pct, 1),
-                message=f"Step {step}/{total_steps}: {phase} ({count:,} items)",
-                total_files=count if step == 1 else None,
-            )
-
-        # Catch any remaining "N/M: phase" lines (no count visible)
-        step_only = re.match(r"(\d+)/(\d+):\s*(.+)", line)
+        # Priority 3: Step without count
+        step_only = _RE_STEP_ONLY.match(line)
         if step_only:
             step = int(step_only.group(1))
             total_steps = int(step_only.group(2))
             phase = step_only.group(3).strip()
-            # Strip leftover progress bar fragments from phase
             phase = re.sub(r"[\[\]<=>]+", "", phase).strip()
             if not phase:
-                return None  # pure progress bar fragment
-            pct = ((step - 1) / total_steps) * 100
+                return None
+            pct = min(5.0, (step / total_steps) * 5.0)
             return ScanProgressInfo(
                 percent=round(pct, 1),
                 message=f"Step {step}/{total_steps}: {phase}",
             )
 
-        # fclones percentage: "50.3%"
-        pct_match = re.search(r"(\d+(?:\.\d+)?)\s*%", line)
-        if pct_match:
-            pct = float(pct_match.group(1))
-            clean = re.sub(r"[\[\]<=>]+", "", line).strip()
-            return ScanProgressInfo(percent=pct, message=clean[:100])
-
-        # fclones log: "[timestamp] fclones: info: Found 56 (28.2 GB) files..."
-        info_match = re.search(r"fclones:\s*\w+:\s*(.+)", line)
+        # Priority 4: fclones info log lines (structured events)
+        info_match = _RE_INFO.search(line)
         if info_match:
             msg = info_match.group(1).strip()
             found_match = re.search(r"Found\s+([\d,]+)\s+\(([\d.]+\s*\w+)\)", msg)
@@ -209,18 +201,8 @@ class FclonesBackend(ScannerBackend):
             if scanned_match:
                 count = int(scanned_match.group(1).replace(",", ""))
                 return ScanProgressInfo(message=msg, total_files=count)
-            redundant_match = re.search(r"Found\s+([\d,]+)\s+.+?redundant", msg)
-            if redundant_match:
+            if "redundant" in msg:
                 return ScanProgressInfo(percent=99.0, message=msg)
-            return ScanProgressInfo(message=msg)
+            return ScanProgressInfo(message=msg[:100])
 
-        # "Initializing" etc
-        if line.lower() in ("initializing", ""):
-            return ScanProgressInfo(message=line)
-
-        # Skip pure progress bar fragments and short noise
-        if re.match(r"^[\s\[\]<=>\-|#.]+$", line) or len(line) < 4:
-            return None
-
-        # Unknown line — return None so it goes to log_buffer instead
         return None
