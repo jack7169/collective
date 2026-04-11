@@ -222,13 +222,24 @@ export function ScanResults() {
 
       <ConfirmDialog
         open={showDelete}
-        onOpenChange={setShowDelete}
+        onOpenChange={(open) => {
+          if (!deleteScan.isPending) setShowDelete(open);
+        }}
         title="Delete Scan"
-        description="Are you sure you want to delete this scan? This action cannot be undone."
-        confirmLabel="Delete"
+        description={
+          deleteScan.isPending
+            ? "Deleting scan data... This may take a moment for large scans."
+            : "Are you sure you want to delete this scan? This action cannot be undone."
+        }
+        confirmLabel={deleteScan.isPending ? "Deleting..." : "Delete"}
         variant="destructive"
+        isPending={deleteScan.isPending}
         onConfirm={() => {
-          if (id) deleteScan.mutate(id);
+          if (id && !deleteScan.isPending) {
+            deleteScan.mutate(id, {
+              onSuccess: () => navigate("/"),
+            });
+          }
         }}
       />
     </div>
