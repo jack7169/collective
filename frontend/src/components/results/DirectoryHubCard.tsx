@@ -135,14 +135,11 @@ export function DirectoryHubCard({
               <div
                 className="px-5 py-3.5 cursor-pointer hover:bg-accent/50 transition-colors"
                 onClick={() => handlePeerClick(peer)}
-                title={[
+                title={
                   peer.uniqueInHub === 0 && peer.uniqueInPeer === 0
                     ? "Identical — no unique files on either side"
-                    : null,
-                  peerExploded.length > 0
-                    ? `Also overlaps with: ${peerExploded.map((ep) => ep.directory.split("/").pop()).join(", ")}`
-                    : null,
-                ].filter(Boolean).join("\n") || undefined}
+                    : undefined
+                }
               >
                 <div className="flex items-center gap-3">
                   <SimilarityBadge value={peer.similarity} />
@@ -155,6 +152,11 @@ export function DirectoryHubCard({
                       )}
                     >
                       {peer.relationship.replace("_", " ")}
+                    </Badge>
+                  )}
+                  {peerExploded.length > 0 && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      {peerExploded.length} exploded connection{peerExploded.length > 1 ? "s" : ""}
                     </Badge>
                   )}
                   <span className="font-mono text-xs text-foreground break-all flex-1">
