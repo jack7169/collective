@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.action import Action, Bookmark
@@ -78,10 +78,28 @@ class ScanService:
 
     @staticmethod
     async def delete_scan(db: AsyncSession, scan_id: int) -> None:
+        # Small tables — delete in one shot
         await db.execute(delete(Bookmark).where(Bookmark.scan_id == scan_id))
         await db.execute(delete(Action).where(Action.scan_id == scan_id))
         await db.execute(delete(DirectorySimilarity).where(DirectorySimilarity.scan_id == scan_id))
         await db.execute(delete(DuplicateDirectory).where(DuplicateDirectory.scan_id == scan_id))
-        await db.execute(delete(DuplicateFile).where(DuplicateFile.scan_id == scan_id))
+        await db.flush()
+
+        # DuplicateFile can have millions of rows — delete in batches
+        # to avoid holding a write lock for too long
+        batch_size = 50000
+        while True:
+            result = await db.execute(
+                text(
+                    "DELETE FROM duplicate_files WHERE rowid IN "
+                    "(SELECT rowid FROM duplicate_files WHERE scan_id = :sid LIMIT :batch)"
+                ),
+                {"sid": scan_id, "batch": batch_size},
+            )
+            await db.flush()
+            if result.rowcount < batch_size:
+                break
+            logger.info("Deleted batch of %d duplicate_files for scan %d", batch_size, scan_id)
+
         await db.execute(delete(Scan).where(Scan.id == scan_id))
         await db.flush()
