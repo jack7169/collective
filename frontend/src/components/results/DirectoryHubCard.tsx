@@ -182,8 +182,9 @@ export function DirectoryHubCard({
                     {formatBytes(peer.peerSize)}
                   </span>
                   <span>
-                    {peer.uniqueInHub} unique here · {peer.uniqueInPeer} unique
-                    there
+                    {hub.totalSize > 0
+                      ? `${Math.round((peer.sharedSize / hub.totalSize) * 100)}% of total lineage`
+                      : ""}
                   </span>
                 </div>
               </div>
