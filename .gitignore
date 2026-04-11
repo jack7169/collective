@@ -33,3 +33,4 @@ htmlcov/
 test-data/
 .playwright-mcp/
 compass_artifact_*.md
+.superpowers/
