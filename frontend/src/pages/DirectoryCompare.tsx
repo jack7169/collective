@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   ArrowLeft,
+  ChevronLeft,
   Play,
   Bookmark,
   SkipForward,
@@ -149,11 +150,12 @@ function TreeNode({ node, style }: NodeRendererProps<ArboristNode>) {
 
 export function DirectoryCompare() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const dirA = searchParams.get("a");
   const dirB = searchParams.get("b");
-  const { data: compare, isLoading } = useCompare(id, dirA, dirB);
-  const { data: treeDiff, isLoading: treeLoading } = useTreeDiff(dirA, dirB);
+  const { data: compare, isLoading: compareLoading } = useCompare(id, dirA, dirB);
+  const { data: treeDiff } = useTreeDiff(dirA, dirB);
   const createAction = useCreateAction();
   const dryRun = useDryRun();
   const [showDryRunModal, setShowDryRunModal] = useState(false);
@@ -165,16 +167,7 @@ export function DirectoryCompare() {
     return transformNodes(treeDiff.tree);
   }, [treeDiff]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-24 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" />
-        Loading comparison...
-      </div>
-    );
-  }
-
-  if (!compare || !dirA || !dirB) {
+  if (!dirA || !dirB) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground">
         Unable to load comparison data. Make sure both directories are specified.
@@ -212,20 +205,30 @@ export function DirectoryCompare() {
     }
   };
 
-  const uniqueACount = compare.only_in_a.length;
-  const uniqueBCount = compare.only_in_b.length;
-  const uniqueASize = compare.only_a_size;
-  const uniqueBSize = compare.only_b_size;
+  const uniqueACount = compare?.only_in_a.length ?? 0;
+  const uniqueBCount = compare?.only_in_b.length ?? 0;
+  const uniqueASize = compare?.only_a_size ?? 0;
+  const uniqueBSize = compare?.only_b_size ?? 0;
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Directory Compare
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Side-by-side comparison with duplicate highlighting
-        </p>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0"
+          onClick={() => navigate(-1)}
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Directory Compare
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Side-by-side comparison with duplicate highlighting
+          </p>
+        </div>
       </div>
 
       {/* Summary stats */}
@@ -233,28 +236,40 @@ export function DirectoryCompare() {
         <Card className="border-l-4 border-l-green-500">
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Shared</p>
-            <p className="text-xl font-bold">{formatNumber(compare.shared_files.length)}</p>
-            <p className="text-xs text-muted-foreground">{formatBytes(compare.shared_size)}</p>
+            {compareLoading ? (
+              <div className="h-7 w-16 bg-muted animate-pulse rounded mt-1" />
+            ) : (
+              <p className="text-xl font-bold">{formatNumber(compare?.shared_files.length ?? 0)}</p>
+            )}
+            <p className="text-xs text-muted-foreground">{compareLoading ? "" : formatBytes(compare?.shared_size ?? 0)}</p>
           </CardContent>
         </Card>
         <Card className={cn("border-l-4 border-l-orange-500", uniqueACount > 0 && "ring-1 ring-orange-500/30")}>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Only in A</p>
-            <p className="text-xl font-bold text-orange-400">{formatNumber(uniqueACount)}</p>
-            <p className="text-xs text-muted-foreground">{formatBytes(uniqueASize)}</p>
+            {compareLoading ? (
+              <div className="h-7 w-16 bg-muted animate-pulse rounded mt-1" />
+            ) : (
+              <p className="text-xl font-bold text-orange-400">{formatNumber(uniqueACount)}</p>
+            )}
+            <p className="text-xs text-muted-foreground">{compareLoading ? "" : formatBytes(uniqueASize)}</p>
           </CardContent>
         </Card>
         <Card className={cn("border-l-4 border-l-blue-500", uniqueBCount > 0 && "ring-1 ring-blue-500/30")}>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Only in B</p>
-            <p className="text-xl font-bold text-blue-400">{formatNumber(uniqueBCount)}</p>
-            <p className="text-xs text-muted-foreground">{formatBytes(uniqueBSize)}</p>
+            {compareLoading ? (
+              <div className="h-7 w-16 bg-muted animate-pulse rounded mt-1" />
+            ) : (
+              <p className="text-xl font-bold text-blue-400">{formatNumber(uniqueBCount)}</p>
+            )}
+            <p className="text-xs text-muted-foreground">{compareLoading ? "" : formatBytes(uniqueBSize)}</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Warning for unique files */}
-      {(uniqueACount > 0 || uniqueBCount > 0) && (
+      {!compareLoading && (uniqueACount > 0 || uniqueBCount > 0) && (
         <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
           <div>
