@@ -8,6 +8,7 @@ import {
   RotateCcw,
   RefreshCw,
   AlertTriangle,
+  Map,
 } from "lucide-react";
 import { useScan, useScanStats, useSaveFromScan, useResumeScan, useReanalyze } from "@/api/scans";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import { StatsCards } from "@/components/results/StatsCards";
 import { SpaceChart } from "@/components/results/SpaceChart";
 import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
 import { SimilarDirectoriesTab } from "@/components/results/SimilarDirectoriesTab";
+import { SessionMap } from "@/components/results/SessionMap";
 import { formatDate, formatTimestamp, formatElapsed } from "@/lib/format";
 import { DeleteScanDialog } from "@/components/common/DeleteScanDialog";
 import { SandboxSessionProvider } from "@/hooks/useSandboxSession";
@@ -174,6 +176,10 @@ export function ScanResults() {
             Duplicate Files
           </TabsTrigger>
           <TabsTrigger value="similar">Similar Directories</TabsTrigger>
+          <TabsTrigger value="map">
+            <Map className="h-4 w-4 mr-1" />
+            Session Map
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview */}
@@ -244,6 +250,11 @@ export function ScanResults() {
         {/* Similar Directories */}
         <TabsContent value="similar">
           {id && <SimilarDirectoriesTab scanId={id} />}
+        </TabsContent>
+
+        {/* Session Map */}
+        <TabsContent value="map">
+          <SessionMap />
         </TabsContent>
       </Tabs>
 
