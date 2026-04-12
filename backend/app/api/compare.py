@@ -58,13 +58,18 @@ async def compare_directories(
     if cache_key in _compare_cache:
         return _compare_cache[cache_key]
 
-    q = select(DuplicateFile).where(
+    q = select(
+        DuplicateFile.path,
+        DuplicateFile.size,
+        DuplicateFile.mtime,
+        DuplicateFile.checksum,
+    ).where(
         DuplicateFile.scan_id == scan_id,
         (DuplicateFile.path.startswith(dir_a + "/"))
         | (DuplicateFile.path.startswith(dir_b + "/")),
     )
     result = await db.execute(q)
-    files = result.scalars().all()
+    files = result.all()
 
     files_a: dict[str, DuplicateFile] = {}
     files_b: dict[str, DuplicateFile] = {}
@@ -85,7 +90,7 @@ async def compare_directories(
     unique_checksums_a = set(checksums_a.keys()) - shared_checksums
     unique_checksums_b = set(checksums_b.keys()) - shared_checksums
 
-    def file_response(f: DuplicateFile) -> dict:
+    def file_response(f) -> dict:
         return {
             "name": os.path.basename(f.path),
             "path": f.path,
@@ -276,6 +281,7 @@ class DirectoryTreeRequest(BaseModel):
     dir_a: str
     dir_b: str
     max_depth: int = 5
+    scan_id: int | None = None
 
 
 _tree_cache: _LRUCache = _LRUCache(maxsize=64)
@@ -288,7 +294,7 @@ async def tree_diff(body: DirectoryTreeRequest):
     showing which subdirectories and files exist in each side.
     Folders where all children share the same status are collapsed by default.
     """
-    cache_key = f"{body.dir_a}:{body.dir_b}:{body.max_depth}"
+    cache_key = f"{body.scan_id}:{body.dir_a}:{body.dir_b}:{body.max_depth}"
     if cache_key in _tree_cache:
         return _tree_cache[cache_key]
 

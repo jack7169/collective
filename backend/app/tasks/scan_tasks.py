@@ -813,6 +813,9 @@ def _compute_similarities_sync(
         for cksum in checksums:
             checksum_to_dirs[cksum].add(dir_path)
 
+    # Pre-cache set sizes for O(1) lookup in the pair generation loop
+    dir_checksum_counts = {d: len(cs) for d, cs in dir_checksums.items()}
+
     # Count shared checksums per directory pair using the inverted index.
     # For each checksum, increment the overlap counter for every pair of
     # directories that share it. Uses a hash map instead of O(N^2) pair
@@ -825,11 +828,19 @@ def _compute_similarities_sync(
     for cksum, dirs in checksum_to_dirs.items():
         if len(dirs) < 2 or len(dirs) > 50:
             continue
-        dirs_list = sorted(dirs)
+        dirs_list = list(dirs)
         cksum_size = checksum_to_size.get(cksum, 0)
         for i in range(len(dirs_list)):
+            a = dirs_list[i]
+            count_a = dir_checksum_counts[a]
             for j in range(i + 1, len(dirs_list)):
-                pair = (dirs_list[i], dirs_list[j])
+                b = dirs_list[j]
+                count_b = dir_checksum_counts[b]
+                # Upper bound: if the smaller set were entirely shared, best possible
+                # Jaccard = min / max. Skip if this can't meet the threshold.
+                if min(count_a, count_b) * 100 < threshold * max(count_a, count_b):
+                    continue
+                pair = (a, b) if a <= b else (b, a)
                 pair_shared_count[pair] += 1
                 pair_shared_size[pair] += cksum_size
 
@@ -838,8 +849,6 @@ def _compute_similarities_sync(
 
     # Compute similarity metrics for pairs that meet the threshold
     all_results = []
-    # Pre-cache set sizes for O(1) lookup instead of O(n) set union per pair
-    dir_checksum_counts = {d: len(cs) for d, cs in dir_checksums.items()}
 
     for (dir_a, dir_b), shared_count in pair_shared_count.items():
         count_a = dir_checksum_counts.get(dir_a, 0)
