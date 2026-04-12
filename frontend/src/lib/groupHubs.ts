@@ -75,7 +75,10 @@ export function buildAdjacency(
  * 3. Greedy hub selection: highest score first, claim its peers
  * 4. Directories already claimed as peers don't become their own hub
  */
-export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
+export function groupIntoHubs(
+  pairs: DirectorySimilarity[],
+  preferredHubs?: Set<string>,
+): DirectoryHub[] {
   if (!pairs.length) return [];
 
   // Filter out noise:
@@ -116,10 +119,13 @@ export function groupIntoHubs(pairs: DirectorySimilarity[]): DirectoryHub[] {
     scores.set(dir, score);
   }
 
-  // Sort directories by score descending
-  const sorted = [...adjacency.keys()].sort(
-    (a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0)
-  );
+  // Sort directories by score descending; user-promoted hubs get top priority
+  const sorted = [...adjacency.keys()].sort((a, b) => {
+    const aPref = preferredHubs?.has(a) ? 1 : 0;
+    const bPref = preferredHubs?.has(b) ? 1 : 0;
+    if (aPref !== bPref) return bPref - aPref;
+    return (scores.get(b) ?? 0) - (scores.get(a) ?? 0);
+  });
 
   // Greedy hub selection — uses prefix matching so subdirectories
   // of already-claimed paths don't become separate hubs

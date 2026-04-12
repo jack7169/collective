@@ -58,10 +58,13 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
   // Tag & Move dialog state
   const [tagMoveHub, setTagMoveHub] = useState<string | null>(null);
 
-  // Group pairs into hubs
+  // Hub promotion — user can override which directory is the hub
+  const [promotedHubs, setPromotedHubs] = useState<Set<string>>(new Set());
+
+  // Group pairs into hubs (re-runs when promotions change)
   const pairs = data?.items ?? [];
   const hubs = useMemo(() => {
-    const grouped = groupIntoHubs(pairs);
+    const grouped = groupIntoHubs(pairs, promotedHubs.size > 0 ? promotedHubs : undefined);
     if (sortBy === "peers") {
       grouped.sort((a, b) => b.peers.length - a.peers.length);
     } else if (sortBy === "size") {
@@ -69,7 +72,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
     }
     // "reclaimable" is the default from groupIntoHubs
     return grouped;
-  }, [pairs, sortBy]);
+  }, [pairs, sortBy, promotedHubs]);
 
   // Build adjacency for exploded network lookups
   const adjacency = useMemo(() => buildAdjacency(pairs), [pairs]);
@@ -95,6 +98,14 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
 
   const handleSkipMove = async (hubDir: string) => {
     await tagMutation.mutateAsync([hubDir]);
+  };
+
+  const handlePromotePeer = (peerDir: string) => {
+    setPromotedHubs((prev) => {
+      const next = new Set(prev);
+      next.add(peerDir);
+      return next;
+    });
   };
 
   const tagMoveHubData = hubs.find((h) => h.directory === tagMoveHub);
@@ -169,6 +180,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
               isTagged={taggedPaths.has(hub.directory)}
               onTagMove={handleTagMove}
               onSkipMove={handleSkipMove}
+              onPromotePeer={handlePromotePeer}
               explodedPeers={getExplodedForHub(hub.directory)}
             />
           ))}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, ChevronDown, Network } from "lucide-react";
+import { Shield, ChevronDown, Network, ArrowUpToLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SimilarityBadge } from "@/components/common/SimilarityBadge";
@@ -16,6 +16,7 @@ interface DirectoryHubCardProps {
   isTagged: boolean;
   onTagMove: (hubDir: string) => void;
   onSkipMove: (hubDir: string) => void;
+  onPromotePeer: (peerDir: string) => void;
   explodedPeers: Map<string, PeerEntry[]>;
 }
 
@@ -25,6 +26,7 @@ export function DirectoryHubCard({
   isTagged,
   onTagMove,
   onSkipMove,
+  onPromotePeer,
   explodedPeers,
 }: DirectoryHubCardProps) {
   const navigate = useNavigate();
@@ -174,6 +176,18 @@ export function DirectoryHubCard({
                       {peerExploded.length} connection{peerExploded.length > 1 ? "s" : ""}
                     </Button>
                   )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs shrink-0 text-muted-foreground hover:text-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPromotePeer(peer.directory);
+                    }}
+                    title="Make this directory the hub (canonical copy)"
+                  >
+                    <ArrowUpToLine className="h-3.5 w-3.5" />
+                  </Button>
                   <span className="text-muted-foreground text-xs">→</span>
                 </div>
                 <div className="flex gap-5 mt-2 ml-16 text-xs text-muted-foreground">
