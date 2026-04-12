@@ -9,3 +9,4 @@ huey==2.5.2
 websockets==15.0.1
 python-multipart==0.0.20
 httptools==0.6.4
+orjson>=3.10
