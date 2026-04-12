@@ -206,6 +206,7 @@ export function SandboxSessionProvider({
       const res = await fetch(`/api/scans/${scanId}/sandbox`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
       if (res.ok) {
         const data = (await res.json()) as { id: number };
