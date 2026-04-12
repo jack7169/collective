@@ -1,8 +1,11 @@
 import logging
 import os
+import queue
 import subprocess
 import tempfile
+import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from sqlalchemy import select, delete, func, insert
@@ -19,7 +22,46 @@ from app.scanners.fclones import FclonesBackend
 from app.scanners.rmlint import RmlintBackend
 from app.tasks.worker import huey
 
+BATCH_SIZE = 50_000
+QUEUE_MAX = 4
+
 logger = logging.getLogger(__name__)
+
+
+def build_similarity_index(
+    records: list,
+    abs_depth: int | None,
+) -> tuple[dict[str, set[str]], dict[str, int], dict[str, int]]:
+    """Build in-memory similarity structures from parsed file records.
+
+    Args:
+        records: Iterable of objects with .path, .checksum, .size attributes
+            (typically DuplicateFileResult instances).
+        abs_depth: Absolute directory depth to truncate parent paths to,
+            or None for no truncation.
+
+    Returns:
+        (dir_checksums, checksum_to_size, dir_total_size) where:
+        - dir_checksums: {parent_dir: set of checksums}
+        - checksum_to_size: {checksum: file size}
+        - dir_total_size: {parent_dir: total bytes}
+    """
+    dir_checksums: dict[str, set[str]] = defaultdict(set)
+    checksum_to_size: dict[str, int] = {}
+    dir_total_size: dict[str, int] = defaultdict(int)
+
+    for rec in records:
+        parent = rec.path.rsplit("/", 1)[0] if "/" in rec.path else ""
+        if abs_depth is not None:
+            parts = parent.rstrip("/").split("/")
+            if len(parts) > abs_depth:
+                parent = "/".join(parts[:abs_depth])
+
+        dir_checksums[parent].add(rec.checksum)
+        checksum_to_size[rec.checksum] = rec.size
+        dir_total_size[parent] += rec.size
+
+    return dict(dir_checksums), dict(checksum_to_size), dict(dir_total_size)
 
 
 class ScanCancelled(Exception):
@@ -325,6 +367,11 @@ def run_scan_task(scan_id: int):
             session.commit()
             return
 
+        # Pre-init similarity structures (populated by pipeline when not skipping)
+        sim_dir_checksums: dict[str, set[str]] | None = None
+        sim_checksum_to_size: dict[str, int] | None = None
+        sim_dir_total_size: dict[str, int] | None = None
+
         if not skip_parsing:
             # Parsing phase (60-85% of overall progress)
             scan.status = "parsing"
@@ -350,88 +397,194 @@ def run_scan_task(scan_id: int):
             session.commit()
 
         if not skip_parsing:
-            # Parse output and collect raw dicts (not ORM objects — 10-20x faster insert)
-            file_records: list[dict] = []
-            dir_records: list[dict] = []
-            total_files = 0
-            total_size = 0
-            duplicates = 0
-            space_recoverable = 0
-            unique_dirs: set[str] = set()
+            # --- Producer/Consumer pipeline: parse + insert concurrently ---
+            # Compute abs_depth for similarity index (copy scan attrs before threads)
+            _scan_depth = scan.scan_depth
+            _target_paths = list(scan.target_paths) if scan.target_paths else None
 
-            last_progress_update = time.time()
+            prefix_depth = 0
+            if _target_paths and _scan_depth is not None and _scan_depth > 0:
+                min_depth = min(len(p.rstrip("/").split("/")) for p in _target_paths)
+                prefix_depth = min_depth
+            pipeline_abs_depth = (prefix_depth + _scan_depth) if _scan_depth is not None and _scan_depth > 0 else None
 
-            for result in backend.parse_output(output_path):
-                if isinstance(result, DuplicateFileResult):
-                    file_records.append({
-                        "scan_id": scan_id,
-                        "checksum": result.checksum,
-                        "path": result.path,
-                        "size": result.size,
-                        "mtime": result.mtime,
-                        "is_original": result.is_original,
-                        "group_id": result.group_id,
-                    })
-                    total_files += 1
-                    total_size += result.size
-                    unique_dirs.add(result.path.rsplit("/", 1)[0] if "/" in result.path else "")
-                    if not result.is_original:
-                        duplicates += 1
-                        space_recoverable += result.size
-                elif isinstance(result, DuplicateDirResult):
-                    dir_records.append({
-                        "scan_id": scan_id,
-                        "group_id": result.group_id,
-                        "path": result.path,
-                        "file_count": result.file_count,
-                        "total_size": result.total_size,
-                        "is_original": result.is_original,
-                    })
-                    unique_dirs.add(result.path)
+            # Shared state between threads
+            batch_queue: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
+            cancel_event = threading.Event()
+            counters_lock = threading.Lock()
+            counters = {
+                "total_files": 0,
+                "total_size": 0,
+                "duplicates": 0,
+                "space_recoverable": 0,
+                "unique_dirs": set(),
+            }
+            producer_errors: list[Exception] = []
+            consumer_errors: list[Exception] = []
 
-                # Update parsing progress every 2 seconds (60-70% range)
-                now = time.time()
-                if now - last_progress_update >= 2:
-                    _check_cancelled(session, scan)
-                    scan.progress_percent = 60.0 + min(10.0, total_files / max(1, total_files + 1000) * 10.0)
-                    scan.progress_message = f"Parsing... {total_files:,} files found"
-                    scan.total_files = total_files
-                    scan.duplicates_found = duplicates
-                    session.commit()
-                    last_progress_update = now
+            # Similarity index built by producer (nonlocal for capture after join)
+            _sim_dir_checksums: dict[str, set[str]] = defaultdict(set)
+            _sim_checksum_to_size: dict[str, int] = {}
+            _sim_dir_total_size: dict[str, int] = defaultdict(int)
 
-            # Raw bulk insert via executemany — bypasses ORM identity map entirely.
-            # 50k batch size is optimal for SQLite (single transaction per batch).
-            batch_size = 50_000
-            total_to_insert = len(file_records) + len(dir_records)
-            inserted = 0
-            last_progress_update = time.time()
+            def _producer():
+                """Parse scanner output, batch records, build similarity index."""
+                try:
+                    file_batch: list[dict] = []
+                    dir_batch: list[dict] = []
 
-            for i in range(0, len(file_records), batch_size):
-                _check_cancelled(session, scan)
-                batch = file_records[i:i + batch_size]
-                session.execute(insert(DuplicateFile), batch)
-                inserted += len(batch)
-                now = time.time()
-                if now - last_progress_update >= 2:
-                    insert_pct = inserted / max(1, total_to_insert)
-                    scan.progress_percent = round(70.0 + insert_pct * 15.0, 1)
-                    scan.progress_message = f"Inserting records... {inserted:,} / {total_to_insert:,}"
-                    session.commit()
-                    last_progress_update = now
+                    for result in backend.parse_output(output_path):
+                        if cancel_event.is_set():
+                            return
 
-            for i in range(0, len(dir_records), batch_size):
-                _check_cancelled(session, scan)
-                batch = dir_records[i:i + batch_size]
-                session.execute(insert(DuplicateDirectory), batch)
-                inserted += len(batch)
-            session.commit()
+                        if isinstance(result, DuplicateFileResult):
+                            file_batch.append({
+                                "scan_id": scan_id,
+                                "checksum": result.checksum,
+                                "path": result.path,
+                                "size": result.size,
+                                "mtime": result.mtime,
+                                "is_original": result.is_original,
+                                "group_id": result.group_id,
+                            })
 
-            scan.total_files = total_files
-            scan.total_dirs = len(unique_dirs)
-            scan.total_size = total_size
-            scan.duplicates_found = duplicates
-            scan.space_recoverable = space_recoverable
+                            # Build similarity index (no DB access)
+                            parent = result.path.rsplit("/", 1)[0] if "/" in result.path else ""
+                            if pipeline_abs_depth is not None:
+                                parts = parent.rstrip("/").split("/")
+                                if len(parts) > pipeline_abs_depth:
+                                    parent = "/".join(parts[:pipeline_abs_depth])
+                            _sim_dir_checksums[parent].add(result.checksum)
+                            _sim_checksum_to_size[result.checksum] = result.size
+                            _sim_dir_total_size[parent] = _sim_dir_total_size.get(parent, 0) + result.size
+
+                            # Update counters
+                            with counters_lock:
+                                counters["total_files"] += 1
+                                counters["total_size"] += result.size
+                                counters["unique_dirs"].add(
+                                    result.path.rsplit("/", 1)[0] if "/" in result.path else ""
+                                )
+                                if not result.is_original:
+                                    counters["duplicates"] += 1
+                                    counters["space_recoverable"] += result.size
+
+                            if len(file_batch) >= BATCH_SIZE:
+                                batch_queue.put(("file", file_batch))
+                                file_batch = []
+
+                        elif isinstance(result, DuplicateDirResult):
+                            dir_batch.append({
+                                "scan_id": scan_id,
+                                "group_id": result.group_id,
+                                "path": result.path,
+                                "file_count": result.file_count,
+                                "total_size": result.total_size,
+                                "is_original": result.is_original,
+                            })
+                            with counters_lock:
+                                counters["unique_dirs"].add(result.path)
+
+                            if len(dir_batch) >= BATCH_SIZE:
+                                batch_queue.put(("dir", dir_batch))
+                                dir_batch = []
+
+                    # Flush remaining records
+                    if file_batch and not cancel_event.is_set():
+                        batch_queue.put(("file", file_batch))
+                    if dir_batch and not cancel_event.is_set():
+                        batch_queue.put(("dir", dir_batch))
+
+                except Exception as e:
+                    producer_errors.append(e)
+                finally:
+                    # Sentinel: signal consumer that producer is done
+                    batch_queue.put(None)
+
+            def _consumer():
+                """Take batches off the queue and insert into DB."""
+                try:
+                    inserted = 0
+                    last_progress_update = time.time()
+
+                    while True:
+                        try:
+                            item = batch_queue.get(timeout=2.0)
+                        except queue.Empty:
+                            # Check cancellation while waiting
+                            if cancel_event.is_set():
+                                return
+                            continue
+
+                        if item is None:
+                            # Producer done — final commit
+                            session.commit()
+                            return
+
+                        batch_type, batch = item
+
+                        # Check cancellation via DB refresh every 2 seconds
+                        now = time.time()
+                        if now - last_progress_update >= 2:
+                            session.refresh(scan)
+                            if scan.status == "cancelled":
+                                cancel_event.set()
+                                return
+
+                        if batch_type == "file":
+                            session.execute(insert(DuplicateFile), batch)
+                        elif batch_type == "dir":
+                            session.execute(insert(DuplicateDirectory), batch)
+
+                        inserted += len(batch)
+
+                        # Update progress every 2 seconds
+                        now = time.time()
+                        if now - last_progress_update >= 2:
+                            with counters_lock:
+                                tf = counters["total_files"]
+                                dup = counters["duplicates"]
+                            scan.progress_percent = 60.0 + min(25.0, inserted / max(1, inserted + BATCH_SIZE) * 25.0)
+                            scan.progress_message = f"Parsing & inserting... {tf:,} files, {inserted:,} inserted"
+                            scan.total_files = tf
+                            scan.duplicates_found = dup
+                            session.commit()
+                            last_progress_update = now
+
+                except Exception as e:
+                    consumer_errors.append(e)
+
+            # Start pipeline threads
+            producer_thread = threading.Thread(target=_producer, name="scan-producer", daemon=True)
+            consumer_thread = threading.Thread(target=_consumer, name="scan-consumer", daemon=True)
+            producer_thread.start()
+            consumer_thread.start()
+
+            # Wait for both to complete
+            producer_thread.join()
+            consumer_thread.join()
+
+            # Check for errors
+            if producer_errors:
+                raise producer_errors[0]
+            if consumer_errors:
+                raise consumer_errors[0]
+
+            # Check if cancelled during pipeline
+            if cancel_event.is_set():
+                raise ScanCancelled(f"Scan {scan_id} cancelled by user")
+
+            # Update scan counters from pipeline
+            scan.total_files = counters["total_files"]
+            scan.total_dirs = len(counters["unique_dirs"])
+            scan.total_size = counters["total_size"]
+            scan.duplicates_found = counters["duplicates"]
+            scan.space_recoverable = counters["space_recoverable"]
+
+            # Export similarity structures for Phase 4
+            sim_dir_checksums = dict(_sim_dir_checksums)
+            sim_checksum_to_size = dict(_sim_checksum_to_size)
+            sim_dir_total_size = dict(_sim_dir_total_size)
 
         # Analysis phase (85-100%) — clear old similarities if resuming
         scan.status = "analyzing"
@@ -450,13 +603,16 @@ def run_scan_task(scan_id: int):
             threshold=scan.similarity_threshold or 50.0,
             depth=scan.scan_depth,
             target_paths=scan.target_paths,
+            prebuilt_dir_checksums=sim_dir_checksums,
+            prebuilt_checksum_to_size=sim_checksum_to_size,
+            prebuilt_dir_total_size=sim_dir_total_size,
         )
 
         # Complete — clear interrupted_phase only on success
         scan.status = "completed"
         scan.interrupted_phase = None
         scan.progress_percent = 100.0
-        scan.progress_message = f"Done. Found {duplicates} duplicates, {similarity_count} similar directory pairs."
+        scan.progress_message = f"Done. Found {scan.duplicates_found or 0} duplicates, {similarity_count} similar directory pairs."
         scan.completed_at = datetime.now(timezone.utc)
         session.commit()
 
@@ -583,46 +739,75 @@ def _compute_similarities_sync(
     threshold: float,
     depth: int | None,
     target_paths: list[str] | None = None,
+    prebuilt_dir_checksums: dict[str, set[str]] | None = None,
+    prebuilt_checksum_to_size: dict[str, int] | None = None,
+    prebuilt_dir_total_size: dict[str, int] | None = None,
 ) -> int:
-    """Synchronous version of similarity computation for Huey worker."""
-    from collections import defaultdict
+    """Synchronous version of similarity computation for Huey worker.
 
-    # Fetch only needed columns (path, checksum, size) — not full ORM objects
-    stmt = (
-        select(DuplicateFile.path, DuplicateFile.checksum, DuplicateFile.size)
-        .where(DuplicateFile.scan_id == scan_id)
-    )
-    rows = session.execute(stmt).all()
+    When pre-built structures are provided (from the parsing pipeline),
+    skips the SELECT query entirely. Falls back to DB read when None
+    (reanalysis path).
+    """
+    t0 = time.time()
 
-    if not rows:
+    if prebuilt_dir_checksums is not None and prebuilt_checksum_to_size is not None and prebuilt_dir_total_size is not None:
+        # Fast path: use pre-built index from the parsing pipeline
+        dir_checksums = prebuilt_dir_checksums
+        checksum_to_size = prebuilt_checksum_to_size
+        dir_total_size = prebuilt_dir_total_size
+        logger.info(
+            "Similarity: using pre-built index (%d dirs, %d checksums) — skipped DB read",
+            len(dir_checksums), len(checksum_to_size),
+        )
+    else:
+        # Fallback: read from DB (reanalysis path)
+        stmt = (
+            select(DuplicateFile.path, DuplicateFile.checksum, DuplicateFile.size)
+            .where(DuplicateFile.scan_id == scan_id)
+        )
+        rows = session.execute(stmt).all()
+        logger.info("Similarity: fetched %d rows in %.1fs", len(rows), time.time() - t0)
+
+        if not rows:
+            return 0
+
+        # Group by parent directory
+        dir_checksums_dd: dict[str, set[str]] = defaultdict(set)
+        checksum_to_size_dd: dict[str, int] = {}
+        dir_total_size_dd: dict[str, int] = defaultdict(int)
+
+        # Compute absolute depth from scan target paths so depth is relative to scan roots.
+        prefix_depth = 0
+        if target_paths and depth is not None and depth > 0:
+            min_depth = min(len(p.rstrip("/").split("/")) for p in target_paths)
+            prefix_depth = min_depth
+        abs_depth = (prefix_depth + depth) if depth is not None and depth > 0 else None
+
+        for path, checksum, size in rows:
+            parent = path.rsplit("/", 1)[0] if "/" in path else ""
+            if abs_depth is not None:
+                parts = parent.rstrip("/").split("/")
+                if len(parts) > abs_depth:
+                    parent = "/".join(parts[:abs_depth])
+
+            dir_checksums_dd[parent].add(checksum)
+            checksum_to_size_dd[checksum] = size
+            dir_total_size_dd[parent] += size
+
+        # Free the raw rows — no longer needed
+        del rows
+
+        dir_checksums = dict(dir_checksums_dd)
+        checksum_to_size = dict(checksum_to_size_dd)
+        dir_total_size = dict(dir_total_size_dd)
+
+    logger.info("Similarity: %d directories, grouped in %.1fs", len(dir_checksums), time.time() - t0)
+
+    if not dir_checksums:
         return 0
 
-    # Group by parent directory
-    dir_checksums: dict[str, set[str]] = defaultdict(set)
-    dir_sizes: dict[str, dict[str, int]] = defaultdict(dict)
-    dir_total_size: dict[str, int] = defaultdict(int)
-
-    # Compute absolute depth from scan target paths so depth is relative to scan roots.
-    # E.g. target_paths=["/mnt/user/X/Y"] has prefix_depth=4, so scan_depth=5 means
-    # compare directories up to 5 levels BELOW the scan root (absolute depth = 4+5 = 9).
-    prefix_depth = 0
-    if target_paths and depth is not None and depth > 0:
-        min_depth = min(len(p.rstrip("/").split("/")) for p in target_paths)
-        prefix_depth = min_depth
-    abs_depth = (prefix_depth + depth) if depth is not None and depth > 0 else None
-
-    for path, checksum, size in rows:
-        parent = path.rsplit("/", 1)[0] if "/" in path else ""
-        if abs_depth is not None:
-            parts = parent.rstrip("/").split("/")
-            if len(parts) > abs_depth:
-                parent = "/".join(parts[:abs_depth])
-
-        dir_checksums[parent].add(checksum)
-        dir_sizes[parent][checksum] = size
-        dir_total_size[parent] += size
-
-    # Build inverted index: checksum → set of directories containing it
+    # Build inverted index: checksum -> set of directories containing it
     checksum_to_dirs: dict[str, set[str]] = defaultdict(set)
     for dir_path, checksums in dir_checksums.items():
         for cksum in checksums:
@@ -630,8 +815,8 @@ def _compute_similarities_sync(
 
     # Count shared checksums per directory pair using the inverted index.
     # For each checksum, increment the overlap counter for every pair of
-    # directories that share it. Uses a hash map instead of O(N²) pair
-    # enumeration — only pairs with actual overlap get entries.
+    # directories that share it. Uses a hash map instead of O(N^2) pair
+    # enumeration -- only pairs with actual overlap get entries.
     # Skip checksums shared by too many directories (>50) to avoid
     # combinatorial explosion on common files.
     pair_shared_count: dict[tuple[str, str], int] = defaultdict(int)
@@ -641,21 +826,15 @@ def _compute_similarities_sync(
         if len(dirs) < 2 or len(dirs) > 50:
             continue
         dirs_list = sorted(dirs)
-        # Get representative size for this checksum
-        cksum_size = 0
-        for d in dirs_list:
-            s = dir_sizes.get(d, {}).get(cksum, 0)
-            if s:
-                cksum_size = s
-                break
+        cksum_size = checksum_to_size.get(cksum, 0)
         for i in range(len(dirs_list)):
             for j in range(i + 1, len(dirs_list)):
                 pair = (dirs_list[i], dirs_list[j])
                 pair_shared_count[pair] += 1
                 pair_shared_size[pair] += cksum_size
 
-    logger.info("Found %d candidate pairs with shared checksums across %d directories",
-                len(pair_shared_count), len(dir_checksums))
+    logger.info("Similarity: %d candidate pairs across %d dirs, pair gen took %.1fs",
+                len(pair_shared_count), len(dir_checksums), time.time() - t0)
 
     # Compute similarity metrics for pairs that meet the threshold
     all_results = []
@@ -665,7 +844,7 @@ def _compute_similarities_sync(
     for (dir_a, dir_b), shared_count in pair_shared_count.items():
         count_a = dir_checksum_counts.get(dir_a, 0)
         count_b = dir_checksum_counts.get(dir_b, 0)
-        # |A ∪ B| = |A| + |B| - |A ∩ B|
+        # |A union B| = |A| + |B| - |A intersect B|
         union_count = count_a + count_b - shared_count
         if not union_count:
             continue
@@ -711,6 +890,9 @@ def _compute_similarities_sync(
         for r in all_results
     ]
 
+    t1 = time.time()
+    logger.info("Similarity: Pass 1 complete — %d results in %.1fs", len(all_results), t1 - t0)
+
     # --- Pass 2: Detect sibling clusters and compute parent-level rollups ---
     # Group leaf pairs by (parent_of_dir_a, parent_of_dir_b)
     parent_clusters: dict[tuple[str, str], list[dict]] = defaultdict(list)
@@ -723,78 +905,90 @@ def _compute_similarities_sync(
             key = (pa, pb) if pa <= pb else (pb, pa)
             parent_clusters[key].append(r)
 
+    # For rollups, aggregate all child dirs under each candidate parent
+    # using the existing per-directory data -- O(D) per parent, not O(R).
+    rollup_candidates = [
+        (pa, pb) for (pa, pb), children in parent_clusters.items()
+        if len(children) >= 3
+        and (pa, pb) not in existing_dirs
+        and (pb, pa) not in existing_dirs
+    ]
+
     rollup_results = []
-    for (parent_a, parent_b), children in parent_clusters.items():
-        if len(children) < 3:
-            continue
-        # Skip if we already have a pair at this level
-        if (parent_a, parent_b) in existing_dirs or (parent_b, parent_a) in existing_dirs:
-            continue
+    if rollup_candidates:
+        # Collect all candidate parent prefixes for batch lookup
+        parent_prefixes: set[str] = set()
+        for pa, pb in rollup_candidates:
+            parent_prefixes.add(pa)
+            parent_prefixes.add(pb)
 
-        # Compute true parent-level similarity from file data
-        checksums_a: set[str] = set()
-        checksums_b: set[str] = set()
-        size_a_total = 0
-        size_b_total = 0
-        sizes_by_checksum: dict[str, int] = {}
+        # Build parent -> aggregated checksums/sizes from existing dir-level data.
+        # For each directory, walk up its ancestors and check set membership --
+        # O(D x max_depth) instead of O(R x P) re-scanning all rows.
+        parent_checksums: dict[str, dict[str, int]] = defaultdict(dict)
+        parent_total_size: dict[str, int] = defaultdict(int)
 
-        for path, checksum, size in rows:
-            parent = path.rsplit("/", 1)[0] if "/" in path else ""
-            if parent.startswith(parent_a + "/") or parent == parent_a:
-                checksums_a.add(checksum)
-                sizes_by_checksum[checksum] = size
-                size_a_total += size
-            elif parent.startswith(parent_b + "/") or parent == parent_b:
-                checksums_b.add(checksum)
-                sizes_by_checksum[checksum] = size
-                size_b_total += size
+        for dir_path, checksums in dir_checksums.items():
+            # Walk up ancestors to find all matching parent prefixes
+            parts = dir_path.split("/")
+            for d in range(len(parts), 0, -1):
+                ancestor = "/".join(parts[:d])
+                if ancestor in parent_prefixes:
+                    for cksum in checksums:
+                        size = checksum_to_size.get(cksum, 0)
+                        if cksum not in parent_checksums[ancestor] or size > parent_checksums[ancestor][cksum]:
+                            parent_checksums[ancestor][cksum] = size
+                    parent_total_size[ancestor] += dir_total_size.get(dir_path, 0)
 
-        if not checksums_a or not checksums_b:
-            continue
+        for parent_a, parent_b in rollup_candidates:
+            ca = parent_checksums.get(parent_a, {})
+            cb = parent_checksums.get(parent_b, {})
+            if not ca or not cb:
+                continue
 
-        shared = checksums_a & checksums_b
-        union = checksums_a | checksums_b
-        shared_count = len(shared)
-        union_count = len(union)
+            shared_ck = set(ca.keys()) & set(cb.keys())
+            union_ck = set(ca.keys()) | set(cb.keys())
+            shared_count = len(shared_ck)
+            union_count = len(union_ck)
+            if not union_count:
+                continue
 
-        if not union_count:
-            continue
+            jaccard = (shared_count / union_count) * 100.0
+            if jaccard < threshold:
+                continue
 
-        jaccard = (shared_count / union_count) * 100.0
-        if jaccard < threshold:
-            continue
+            count_a = len(ca)
+            count_b = len(cb)
+            a_sub = (shared_count / count_a) * 100.0 if count_a else 0.0
+            b_sub = (shared_count / count_b) * 100.0 if count_b else 0.0
+            shared_size = sum(max(ca.get(c, 0), cb.get(c, 0)) for c in shared_ck)
 
-        count_a = len(checksums_a)
-        count_b = len(checksums_b)
-        a_sub = (shared_count / count_a) * 100.0 if count_a else 0.0
-        b_sub = (shared_count / count_b) * 100.0 if count_b else 0.0
-        shared_size = sum(sizes_by_checksum.get(c, 0) for c in shared)
+            if jaccard >= 99.0:
+                rel = "exact"
+            elif a_sub >= 95.0:
+                rel = "subset"
+            elif b_sub >= 95.0:
+                rel = "superset"
+            else:
+                rel = "overlap"
 
-        if jaccard >= 99.0:
-            rel = "exact"
-        elif a_sub >= 95.0:
-            rel = "subset"
-        elif b_sub >= 95.0:
-            rel = "superset"
-        else:
-            rel = "overlap"
+            rollup_results.append({
+                "dir_a": parent_a, "dir_b": parent_b,
+                "files_a": count_a, "files_b": count_b,
+                "shared_files": shared_count, "shared_size": shared_size,
+                "size_a": parent_total_size.get(parent_a, 0),
+                "size_b": parent_total_size.get(parent_b, 0),
+                "jaccard_similarity": round(jaccard, 2),
+                "a_subset_pct": round(a_sub, 2),
+                "b_subset_pct": round(b_sub, 2),
+                "unique_to_a": count_a - shared_count,
+                "unique_to_b": count_b - shared_count,
+                "relationship": rel,
+            })
 
-        rollup_results.append({
-            "dir_a": parent_a, "dir_b": parent_b,
-            "files_a": count_a, "files_b": count_b,
-            "shared_files": shared_count, "shared_size": shared_size,
-            "size_a": size_a_total, "size_b": size_b_total,
-            "jaccard_similarity": round(jaccard, 2),
-            "a_subset_pct": round(a_sub, 2),
-            "b_subset_pct": round(b_sub, 2),
-            "unique_to_a": count_a - shared_count,
-            "unique_to_b": count_b - shared_count,
-            "relationship": rel,
-        })
+    logger.info("Similarity: Pass 2 complete — %d rollups in %.1fs", len(rollup_results), time.time() - t1)
 
     if rollup_results:
-        logger.info("Pass 2: %d parent-level rollup pairs from %d sibling clusters",
-                    len(rollup_results), len([c for c in parent_clusters.values() if len(c) >= 3]))
         for r in rollup_results:
             records.append(DirectorySimilarity(
                 scan_id=scan_id,
