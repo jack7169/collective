@@ -48,27 +48,73 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
     Map<string, SuggestedKeeper>
   >(new Map());
 
-  // Compute stats from sandbox-derived keepers
-  const keeperStats = useMemo(() => {
-    let resolvedCount = 0;
-    let totalReclaimable = 0;
-    let totalDeleteFiles = 0;
-    if (!groups) return { resolvedCount, totalReclaimable, totalDeleteFiles };
+  // Auto-resolution: derive keeper from cross-tab directory tagging
+  const autoResolved = useMemo(() => {
+    const result = new Map<string, { fileId: number; reason: string }>();
+    if (!groups) return result;
+
+    const tagged = session.derived.taggedOriginals;
+    const doomed = session.derived.markedForDelete;
+    if (tagged.size === 0 && doomed.size === 0) return result;
 
     for (const group of groups) {
-      const keeperId = session.derived.keepers.get(group.checksum);
-      if (keeperId != null) {
-        resolvedCount++;
+      if (session.derived.keepers.has(group.checksum)) continue;
+
+      let candidateId: number | null = null;
+      let candidateDir = "";
+      let candidateCount = 0;
+
+      for (const file of group.files) {
+        const inOriginal = [...tagged].some((d) => file.path.startsWith(d + "/"));
+        if (inOriginal) {
+          candidateId = file.id;
+          candidateDir = [...tagged].find((d) => file.path.startsWith(d + "/"))!;
+          candidateCount++;
+        }
+      }
+
+      if (candidateCount === 1 && candidateId !== null) {
+        const dirName = candidateDir.split("/").pop() || candidateDir;
+        result.set(group.checksum, {
+          fileId: candidateId,
+          reason: `Keeper is in tagged original: ${dirName}`,
+        });
+      }
+    }
+    return result;
+  }, [groups, session.derived.taggedOriginals, session.derived.markedForDelete, session.derived.keepers]);
+
+  // Helper: return manual keeper if set, otherwise auto-resolved keeper
+  const getEffectiveKeeper = (checksum: string): number | undefined => {
+    return session.derived.keepers.get(checksum) ?? autoResolved.get(checksum)?.fileId;
+  };
+
+  // Compute stats from sandbox-derived keepers (manual + auto)
+  const keeperStats = useMemo(() => {
+    let manualCount = 0;
+    let autoCount = 0;
+    let totalReclaimable = 0;
+    let totalDeleteFiles = 0;
+    if (!groups) return { manualCount, autoCount, resolvedCount: 0, totalReclaimable, totalDeleteFiles };
+
+    for (const group of groups) {
+      const manualKeeper = session.derived.keepers.get(group.checksum);
+      const autoKeeper = autoResolved.get(group.checksum)?.fileId;
+      const effectiveKeeper = manualKeeper ?? autoKeeper;
+
+      if (effectiveKeeper != null) {
+        if (manualKeeper != null) manualCount++;
+        else autoCount++;
         for (const file of group.files) {
-          if (file.id !== keeperId) {
+          if (file.id !== effectiveKeeper) {
             totalDeleteFiles++;
             totalReclaimable += file.size;
           }
         }
       }
     }
-    return { resolvedCount, totalReclaimable, totalDeleteFiles };
-  }, [groups, session.derived.keepers]);
+    return { manualCount, autoCount, resolvedCount: manualCount + autoCount, totalReclaimable, totalDeleteFiles };
+  }, [groups, session.derived.keepers, autoResolved]);
 
   // Count suggestions that haven't been resolved yet
   const unresolvedSuggestionCount = useMemo(() => {
@@ -208,6 +254,11 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
           <span className="text-sm text-muted-foreground">
             {keeperStats.resolvedCount} of {formatNumber(data.total)} groups
             resolved
+            {keeperStats.autoCount > 0 && (
+              <span className="text-success ml-1">
+                ({keeperStats.autoCount} auto, {keeperStats.manualCount} manual)
+              </span>
+            )}
             {keeperStats.totalReclaimable > 0 && (
               <>
                 {" · "}
@@ -235,17 +286,31 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
 
       {/* Group cards */}
       <div className="flex flex-col gap-3">
-        {groups.map((group) => (
-          <DuplicateGroupCard
-            key={group.checksum}
-            group={group}
-            keeperFileId={session.derived.keepers.get(group.checksum)}
-            suggestion={suggestions.get(group.checksum)}
-            onSetKeeper={handleSetKeeper}
-            onClearKeeper={handleClearKeeper}
-            onAcceptSuggestion={handleAcceptSuggestion}
-          />
-        ))}
+        {groups.map((group) => {
+          const effectiveKeeper = getEffectiveKeeper(group.checksum);
+          const auto = autoResolved.get(group.checksum);
+
+          const fileStatuses = new Map<number, "original" | "doomed" | "neutral">();
+          for (const file of group.files) {
+            const inOriginal = [...session.derived.taggedOriginals].some((d) => file.path.startsWith(d + "/"));
+            const inDoomed = [...session.derived.markedForDelete.keys()].some((d) => file.path.startsWith(d + "/"));
+            fileStatuses.set(file.id, inOriginal ? "original" : inDoomed ? "doomed" : "neutral");
+          }
+
+          return (
+            <DuplicateGroupCard
+              key={group.checksum}
+              group={group}
+              keeperFileId={effectiveKeeper}
+              suggestion={suggestions.get(group.checksum)}
+              autoResolution={auto}
+              fileStatuses={fileStatuses}
+              onSetKeeper={handleSetKeeper}
+              onClearKeeper={handleClearKeeper}
+              onAcceptSuggestion={handleAcceptSuggestion}
+            />
+          );
+        })}
       </div>
 
       {/* Pagination */}
