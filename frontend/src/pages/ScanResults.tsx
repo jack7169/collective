@@ -49,6 +49,7 @@ export function ScanResults() {
   const resumeScan = useResumeScan();
   const reanalyze = useReanalyze();
   const [showDelete, setShowDelete] = useState(false);
+  const [highlightDirectory, setHighlightDirectory] = useState<string | null>(null);
 
   if (scanLoading) {
     return (
@@ -242,6 +243,7 @@ export function ScanResults() {
             <DuplicateGroupsList
               scanId={id}
               onViewParentDirectory={(dir) => {
+                setHighlightDirectory(dir);
                 setSearchParams({ tab: "similar" }, { replace: true });
               }}
             />
@@ -250,7 +252,13 @@ export function ScanResults() {
 
         {/* Similar Directories */}
         <TabsContent value="similar">
-          {id && <SimilarDirectoriesTab scanId={id} />}
+          {id && (
+            <SimilarDirectoriesTab
+              scanId={id}
+              highlightDirectory={highlightDirectory}
+              onHighlightClear={() => setHighlightDirectory(null)}
+            />
+          )}
         </TabsContent>
 
       </Tabs>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   FolderOpen,
   Loader2,
@@ -29,9 +29,11 @@ type SortField = "reclaimable" | "peers" | "size";
 
 interface SimilarDirectoriesTabProps {
   scanId: string;
+  highlightDirectory?: string | null;
+  onHighlightClear?: () => void;
 }
 
-export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
+export function SimilarDirectoriesTab({ scanId, highlightDirectory, onHighlightClear }: SimilarDirectoriesTabProps) {
   const [sortBy, setSortBy] = useState<SortField>("reclaimable");
   const [relationship, setRelationship] = useState<string>("all");
   const session = useSandbox();
@@ -93,6 +95,34 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
   const handlePromotePeer = (peerDir: string) => {
     session.execute({ type: "promote-hub", peerDir });
   };
+
+  // Scroll + highlight when a directory is targeted from another tab
+  const hubListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!highlightDirectory || !hubListRef.current) return;
+
+    // Find the hub that contains this directory (as hub or as a peer)
+    const targetHub = hubs.find(
+      (h) =>
+        highlightDirectory.startsWith(h.directory) ||
+        h.peers.some((p) => highlightDirectory.startsWith(p.directory))
+    );
+    if (!targetHub) return;
+
+    // Find the DOM element and scroll to it
+    const el = hubListRef.current.querySelector(
+      `[data-hub-directory="${CSS.escape(targetHub.directory)}"]`
+    );
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+      // Remove highlight after 3 seconds
+      setTimeout(() => {
+        el.classList.remove("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+        onHighlightClear?.();
+      }, 3000);
+    }
+  }, [highlightDirectory, hubs, onHighlightClear]);
 
   const tagMoveHubData = hubs.find((h) => h.directory === tagMoveHub);
   const totalReclaimable = hubs.reduce((s, h) => s + h.totalReclaimable, 0);
@@ -157,10 +187,10 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div ref={hubListRef} className="flex flex-col gap-4">
           {hubs.map((hub) => (
+            <div key={hub.directory} data-hub-directory={hub.directory} className="rounded-lg transition-all duration-300">
             <DirectoryHubCard
-              key={hub.directory}
               hub={hub}
               scanId={scanId}
               isTagged={session.derived.taggedOriginals.has(hub.directory)}
@@ -169,6 +199,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
               onPromotePeer={handlePromotePeer}
               explodedPeers={getExplodedForHub(hub.directory)}
             />
+            </div>
           ))}
         </div>
       )}
