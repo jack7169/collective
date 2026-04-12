@@ -152,3 +152,23 @@ async def init_db():
             await conn.execute(text(
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '3')"
             ))
+
+        if current_version < 4:
+            await conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS sandbox_sessions ("
+                "  id INTEGER PRIMARY KEY,"
+                "  scan_id INTEGER NOT NULL REFERENCES scans(id) ON DELETE CASCADE,"
+                "  name TEXT,"
+                "  commands TEXT NOT NULL DEFAULT '[]',"
+                "  cursor INTEGER NOT NULL DEFAULT 0,"
+                "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_sandbox_sessions_scan_id "
+                "ON sandbox_sessions (scan_id)"
+            ))
+            await conn.execute(text(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '4')"
+            ))
