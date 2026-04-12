@@ -71,8 +71,8 @@ async def compare_directories(
     result = await db.execute(q)
     files = result.all()
 
-    files_a: dict[str, DuplicateFile] = {}
-    files_b: dict[str, DuplicateFile] = {}
+    files_a: dict = {}
+    files_b: dict = {}
     checksums_a: dict[str, list[str]] = {}
     checksums_b: dict[str, list[str]] = {}
 
