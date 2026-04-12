@@ -27,6 +27,31 @@ export function formatDate(date: string): string {
   }
 }
 
+export function formatTimestamp(date: string): string {
+  try {
+    const normalized = date.endsWith("Z") || date.includes("+") ? date : date + "Z";
+    const d = parseISO(normalized);
+    return d.toLocaleDateString(undefined, {
+      month: "short", day: "numeric", year: "numeric",
+      hour: "numeric", minute: "2-digit",
+    });
+  } catch {
+    return date;
+  }
+}
+
+export function formatElapsed(startedAt: string, completedAt: string): string {
+  try {
+    const normS = startedAt.endsWith("Z") || startedAt.includes("+") ? startedAt : startedAt + "Z";
+    const normC = completedAt.endsWith("Z") || completedAt.includes("+") ? completedAt : completedAt + "Z";
+    const ms = parseISO(normC).getTime() - parseISO(normS).getTime();
+    if (ms < 0) return "—";
+    return formatDuration(ms);
+  } catch {
+    return "—";
+  }
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const seconds = Math.floor(ms / 1000);

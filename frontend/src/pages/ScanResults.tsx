@@ -23,7 +23,7 @@ import { StatsCards } from "@/components/results/StatsCards";
 import { SpaceChart } from "@/components/results/SpaceChart";
 import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
 import { SimilarDirectoriesTab } from "@/components/results/SimilarDirectoriesTab";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatTimestamp, formatElapsed } from "@/lib/format";
 import { DeleteScanDialog } from "@/components/common/DeleteScanDialog";
 
 const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
@@ -81,7 +81,14 @@ export function ScanResults() {
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Scanned {formatDate(scan.created_at)} using {scan.scanner}
+            {scan.started_at && scan.completed_at ? (
+              <>
+                {formatTimestamp(scan.started_at)} — {formatElapsed(scan.started_at, scan.completed_at)} elapsed
+              </>
+            ) : (
+              <>Scanned {formatDate(scan.created_at)}</>
+            )}
+            {" · "}{scan.scanner}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -161,7 +168,7 @@ export function ScanResults() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="groups">
             <Layers className="h-4 w-4 mr-1" />
-            Duplicate Groups
+            Duplicate Files
           </TabsTrigger>
           <TabsTrigger value="similar">Similar Directories</TabsTrigger>
         </TabsList>
@@ -226,7 +233,7 @@ export function ScanResults() {
           </div>
         </TabsContent>
 
-        {/* Duplicate Groups (Czkawka-style) */}
+        {/* Duplicate Files (Czkawka-style) */}
         <TabsContent value="groups">
           {id && <DuplicateGroupsList scanId={id} />}
         </TabsContent>

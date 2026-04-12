@@ -3,6 +3,7 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from app.config import get_settings
 
@@ -82,3 +83,38 @@ async def browse_directory(path: Optional[str] = Query(None)):
         "parent": parent if parent_allowed else None,
         "entries": entries,
     }
+
+
+class MkdirRequest(BaseModel):
+    path: str
+    name: str
+
+
+@router.post("/mkdir")
+async def create_directory(body: MkdirRequest):
+    """Create a new directory inside an allowed browse path."""
+    allowed = _allowed_roots()
+    parent = os.path.realpath(body.path)
+
+    if not any(parent == root or parent.startswith(root + os.sep) for root in allowed):
+        raise HTTPException(status_code=403, detail="Access denied: path is outside allowed directories")
+    if not os.path.isdir(parent):
+        raise HTTPException(status_code=404, detail="Parent directory not found")
+
+    # Sanitize name — no slashes or path traversal
+    name = body.name.strip().replace("/", "").replace("\\", "")
+    if not name or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid directory name")
+
+    new_path = os.path.join(parent, name)
+    if os.path.exists(new_path):
+        raise HTTPException(status_code=409, detail="Directory already exists")
+
+    try:
+        os.makedirs(new_path)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied creating directory")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create directory: {e}")
+
+    return {"path": new_path, "name": name}
