@@ -13,6 +13,7 @@ import {
   type DerivedSandboxState,
   type SandboxCommand,
 } from "@/lib/sandboxCommands";
+import { useSandboxSessionQuery } from "@/api/sandbox";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,6 +108,26 @@ export function SandboxSessionProvider({
     const persisted = loadPersistedState(scanId);
     return persisted?.sessionId ?? null;
   });
+
+  const { data: backendSession } = useSandboxSessionQuery(scanId);
+
+  // Sync backend session with localStorage on first load — take the newer source
+  const hasInitialized = useRef(false);
+  useEffect(() => {
+    if (backendSession && !hasInitialized.current) {
+      hasInitialized.current = true;
+      const lsState = loadPersistedState(scanId);
+      const backendTime = new Date(backendSession.updated_at).getTime();
+      if (!lsState || lsState.savedAt <= backendTime) {
+        setCommands(backendSession.commands as SandboxCommand[]);
+        setCursor(backendSession.cursor);
+        setSessionId(backendSession.id);
+      } else {
+        // localStorage is newer — just sync the session ID
+        setSessionId(backendSession.id);
+      }
+    }
+  }, [backendSession, scanId]);
 
   // Ref to track whether we're currently creating a session (avoid duplicates)
   const creatingSession = useRef(false);
