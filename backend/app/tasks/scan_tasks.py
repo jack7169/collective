@@ -889,16 +889,6 @@ def _compute_similarities_sync(
             "relationship": relationship,
         })
 
-    records = [
-        DirectorySimilarity(
-            scan_id=scan_id,
-            structural_similarity=None,
-            is_rollup=False,
-            **r,
-        )
-        for r in all_results
-    ]
-
     t1 = time.time()
     logger.info("Similarity: Pass 1 complete — %d results in %.1fs", len(all_results), t1 - t0)
 
@@ -997,20 +987,27 @@ def _compute_similarities_sync(
 
     logger.info("Similarity: Pass 2 complete — %d rollups in %.1fs", len(rollup_results), time.time() - t1)
 
+    # Core bulk insert — bypasses ORM identity map, batch_size=10000
+    all_sim_dicts = [{
+        "scan_id": scan_id,
+        "structural_similarity": None,
+        "is_rollup": False,
+        **r,
+    } for r in all_results]
+
     if rollup_results:
         for r in rollup_results:
-            records.append(DirectorySimilarity(
-                scan_id=scan_id,
-                structural_similarity=None,
-                is_rollup=True,
+            all_sim_dicts.append({
+                "scan_id": scan_id,
+                "structural_similarity": None,
+                "is_rollup": True,
                 **r,
-            ))
+            })
 
-    # Bulk insert similarities
-    batch_size = 1000
-    for i in range(0, len(records), batch_size):
-        session.add_all(records[i:i + batch_size])
-        session.flush()
+    batch_size = 10_000
+    for i in range(0, len(all_sim_dicts), batch_size):
+        session.execute(insert(DirectorySimilarity), all_sim_dicts[i:i + batch_size])
     session.commit()
 
-    return len(records)
+    logger.info("Similarity: inserted %d records (%.1fs total)", len(all_sim_dicts), time.time() - t0)
+    return len(all_sim_dicts)
