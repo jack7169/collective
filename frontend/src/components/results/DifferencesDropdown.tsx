@@ -33,7 +33,9 @@ function formatMtime(mtime: string): string {
 
 function computeVerdict(
   onlyInA: CompareFile[],
-  onlyInB: CompareFile[]
+  onlyInB: CompareFile[],
+  nameA: string,
+  nameB: string,
 ): {
   type: "newer_b" | "newer_a" | "merge" | "identical";
   message: string;
@@ -61,9 +63,9 @@ function computeVerdict(
       };
     }
     if (onlyInB.length > 0) {
-      return { type: "newer_b", message: "B has files not in A" };
+      return { type: "newer_b", message: `${nameB} has files not in ${nameA}` };
     }
-    return { type: "newer_a", message: "A has files not in B" };
+    return { type: "newer_a", message: `${nameA} has files not in ${nameB}` };
   }
 
   const maxA = Math.max(...mtimesA);
@@ -74,28 +76,26 @@ function computeVerdict(
   if (onlyInA.length === 0 && onlyInB.length > 0) {
     return {
       type: "newer_b",
-      message: `B appears to be a newer version of A — B has ${onlyInB.length} file${onlyInB.length > 1 ? "s" : ""} not in A`,
+      message: `${nameB} appears newer — has ${onlyInB.length} file${onlyInB.length > 1 ? "s" : ""} not in ${nameA}`,
     };
   }
   if (onlyInB.length === 0 && onlyInA.length > 0) {
     return {
       type: "newer_a",
-      message: `A appears to be a newer version of B — A has ${onlyInA.length} file${onlyInA.length > 1 ? "s" : ""} not in B`,
+      message: `${nameA} appears newer — has ${onlyInA.length} file${onlyInA.length > 1 ? "s" : ""} not in ${nameB}`,
     };
   }
 
   if (minB > maxA) {
     return {
       type: "newer_b",
-      message:
-        "B appears to be a newer version of A — B's unique files are all newer",
+      message: `${nameB} appears newer — its unique files are all newer than ${nameA}'s`,
     };
   }
   if (minA > maxB) {
     return {
       type: "newer_a",
-      message:
-        "A appears to be a newer version of B — A's unique files are all newer",
+      message: `${nameA} appears newer — its unique files are all newer than ${nameB}'s`,
     };
   }
 
@@ -196,6 +196,10 @@ export function DifferencesDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const hasAnyDifferences = uniqueToA > 0;
 
+  // Human-readable names instead of "A" / "B"
+  const nameA = dirA.split("/").pop() || dirA;
+  const nameB = dirB.split("/").pop() || dirB;
+
   // Only fetch comparison data when dropdown is opened
   const { data: compare, isLoading } = useCompare(
     isOpen ? scanId : undefined,
@@ -204,7 +208,7 @@ export function DifferencesDropdown({
   );
 
   const verdict = compare
-    ? computeVerdict(compare.only_in_a, compare.only_in_b)
+    ? computeVerdict(compare.only_in_a, compare.only_in_b, nameA, nameB)
     : null;
 
   const verdictIcon = {
@@ -244,7 +248,7 @@ export function DifferencesDropdown({
           Show differences
         </span>
         <span className="text-[11px] text-muted-foreground">
-          — {uniqueToA} unique to A · {uniqueToB} unique to B
+          — {uniqueToA} unique to {nameA} · {uniqueToB} unique to {nameB}
         </span>
       </button>
 
@@ -274,7 +278,7 @@ export function DifferencesDropdown({
                 <div className="p-3 border-r border-border">
                   <FileList
                     files={compare.only_in_a}
-                    label={`${compare.only_in_a.length} files only in A`}
+                    label={`${compare.only_in_a.length} only in ${nameA}`}
                     totalSize={compare.only_a_size}
                     colorClass="text-orange-400"
                     bgClass="bg-orange-500/5"
@@ -283,7 +287,7 @@ export function DifferencesDropdown({
                 <div className="p-3">
                   <FileList
                     files={compare.only_in_b}
-                    label={`${compare.only_in_b.length} files only in B`}
+                    label={`${compare.only_in_b.length} only in ${nameB}`}
                     totalSize={compare.only_b_size}
                     colorClass="text-blue-400"
                     bgClass="bg-blue-500/5"

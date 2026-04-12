@@ -76,7 +76,7 @@ export function DirectoryPairCard({
         >
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Directory A
+              {pair.dir_a.split("/").pop()}
             </span>
             {aIsTagged && (
               <span className="text-[9px] font-semibold text-success bg-success/15 px-2 py-0.5 rounded">
@@ -90,7 +90,7 @@ export function DirectoryPairCard({
           <div className="flex gap-4 mt-2 text-[11px] text-muted-foreground">
             <span>{formatNumber(pair.files_a)} files</span>
             <span>{formatBytes(pair.size_a)}</span>
-            <span>A in B: {pair.a_subset_pct.toFixed(1)}%</span>
+            <span>{pair.a_subset_pct.toFixed(1)}% overlap</span>
           </div>
           <Button
             variant={aIsTagged ? "default" : "outline"}
@@ -121,7 +121,7 @@ export function DirectoryPairCard({
         <div className={cn("p-4", bIsTagged && "bg-success/5")}>
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Directory B
+              {pair.dir_b.split("/").pop()}
             </span>
             {bIsTagged && (
               <span className="text-[9px] font-semibold text-success bg-success/15 px-2 py-0.5 rounded">
@@ -135,7 +135,7 @@ export function DirectoryPairCard({
           <div className="flex gap-4 mt-2 text-[11px] text-muted-foreground">
             <span>{formatNumber(pair.files_b)} files</span>
             <span>{formatBytes(pair.size_b)}</span>
-            <span>B in A: {pair.b_subset_pct.toFixed(1)}%</span>
+            <span>{pair.b_subset_pct.toFixed(1)}% overlap</span>
           </div>
           <Button
             variant={bIsTagged ? "default" : "outline"}

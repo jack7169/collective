@@ -1,4 +1,4 @@
-import { Shield, Check, CheckCircle, AlertTriangle } from "lucide-react";
+import { Shield, Check, CheckCircle, AlertTriangle, FolderSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "@/lib/format";
@@ -15,6 +15,7 @@ interface DuplicateGroupCardProps {
   onSetKeeper: (checksum: string, fileId: number) => void;
   onClearKeeper: (checksum: string) => void;
   onAcceptSuggestion: (checksum: string) => void;
+  onViewParentDirectory?: (directory: string) => void;
 }
 
 export function DuplicateGroupCard({
@@ -26,6 +27,7 @@ export function DuplicateGroupCard({
   onSetKeeper,
   onClearKeeper,
   onAcceptSuggestion,
+  onViewParentDirectory,
 }: DuplicateGroupCardProps) {
   const isResolved = keeperFileId != null;
   const isAutoResolved = autoResolution != null && keeperFileId === autoResolution.fileId;
@@ -65,6 +67,23 @@ export function DuplicateGroupCard({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {onViewParentDirectory && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                // Use the first file's parent directory
+                const firstPath = group.files[0]?.path ?? "";
+                const parentDir = firstPath.substring(0, firstPath.lastIndexOf("/"));
+                onViewParentDirectory(parentDir);
+              }}
+              title="View this directory in Similar Directories tab"
+            >
+              <FolderSearch className="h-3.5 w-3.5 mr-1" />
+              View parent
+            </Button>
+          )}
           {isResolved && (
             <Badge variant="success" className="text-xs">
               <Check className="h-3 w-3 mr-1" />

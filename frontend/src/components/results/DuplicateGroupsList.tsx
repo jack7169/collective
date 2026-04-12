@@ -18,6 +18,7 @@ import { formatBytes, formatNumber } from "@/lib/format";
 
 interface DuplicateGroupsListProps {
   scanId: string;
+  onViewParentDirectory?: (directory: string) => void;
 }
 
 interface SuggestKeepersResponse {
@@ -34,7 +35,7 @@ interface SuggestKeepersResponse {
   } | null;
 }
 
-export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
+export function DuplicateGroupsList({ scanId, onViewParentDirectory }: DuplicateGroupsListProps) {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("size");
   const { data, isLoading } = useDuplicateGroups(scanId, page, 20, sortBy);
@@ -308,6 +309,7 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
               onSetKeeper={handleSetKeeper}
               onClearKeeper={handleClearKeeper}
               onAcceptSuggestion={handleAcceptSuggestion}
+              onViewParentDirectory={onViewParentDirectory}
             />
           );
         })}
