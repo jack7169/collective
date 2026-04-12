@@ -3,7 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -238,22 +238,22 @@ async def list_duplicate_files(
 async def scan_stats(scan_id: int, db: AsyncSession = Depends(get_db)):
     scan = await _get_scan_or_404(db, scan_id)
 
-    total_files_q = select(func.count()).select_from(DuplicateFile).where(
-        DuplicateFile.scan_id == scan_id
+    # Single query for file stats using conditional aggregation
+    stats_q = await db.execute(
+        select(
+            func.count().label("total_files"),
+            func.sum(
+                case((DuplicateFile.is_original == False, 1), else_=0)  # noqa: E712
+            ).label("duplicate_count"),
+            func.sum(
+                case((DuplicateFile.is_original == False, DuplicateFile.size), else_=0)  # noqa: E712
+            ).label("recoverable_space"),
+        ).where(DuplicateFile.scan_id == scan_id)
     )
-    total_files = (await db.execute(total_files_q)).scalar()
-
-    dupes_q = select(func.count()).select_from(DuplicateFile).where(
-        DuplicateFile.scan_id == scan_id,
-        DuplicateFile.is_original == False,  # noqa: E712
-    )
-    total_dupes = (await db.execute(dupes_q)).scalar()
-
-    recoverable_q = select(func.coalesce(func.sum(DuplicateFile.size), 0)).where(
-        DuplicateFile.scan_id == scan_id,
-        DuplicateFile.is_original == False,  # noqa: E712
-    )
-    space_recoverable = (await db.execute(recoverable_q)).scalar()
+    stats_row = stats_q.one()
+    total_files = stats_row.total_files or 0
+    duplicate_count = stats_row.duplicate_count or 0
+    recoverable_space = stats_row.recoverable_space or 0
 
     top_groups_q = (
         select(
@@ -324,18 +324,19 @@ async def tag_originals(
     # Step 2: Mark files under tagged paths as originals
     # For each checksum group, the first file found under an original path
     # is the original; all others are duplicates
-    tagged_count = 0
-    for path in body.original_paths:
-        path_prefix = path.rstrip("/") + "/"
-        result = await db.execute(
-            update(DuplicateFile)
-            .where(
-                DuplicateFile.scan_id == scan_id,
-                DuplicateFile.path.startswith(path_prefix),
-            )
-            .values(is_original=True)
+    path_conditions = [
+        DuplicateFile.path.startswith(path.rstrip("/") + "/")
+        for path in body.original_paths
+    ]
+    result = await db.execute(
+        update(DuplicateFile)
+        .where(
+            DuplicateFile.scan_id == scan_id,
+            or_(*path_conditions),
         )
-        tagged_count += result.rowcount
+        .values(is_original=True)
+    )
+    tagged_count = result.rowcount
 
     # Step 3: For checksum groups that have NO original yet, pick the
     # lowest-ID file as original — single SQL instead of per-checksum loop
