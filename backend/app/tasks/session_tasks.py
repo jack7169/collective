@@ -26,7 +26,7 @@ def _replay_commands(commands: list[dict], cursor: int) -> dict:
       - keepers: dict mapping group_id -> keeper_path
     """
     tagged_originals: set[str] = set()
-    marked_deletes: set[str] = set()
+    marked_deletes: dict[str, str] = {}  # peer_dir → hub_dir (from reason)
     move_dests: dict[str, str] = {}
     keepers: dict[str, str] = {}
 
@@ -41,9 +41,14 @@ def _replay_commands(commands: list[dict], cursor: int) -> dict:
             tagged_originals.discard(path)
 
         elif cmd_type == "mark-delete":
-            marked_deletes.add(path)
+            reason = cmd.get("reason", "")
+            # Extract hub dir from reason like "Duplicate of /mnt/user/..."
+            hub_dir = ""
+            if reason.startswith("Duplicate of "):
+                hub_dir = reason[len("Duplicate of "):]
+            marked_deletes[path] = hub_dir
         elif cmd_type == "unmark-delete":
-            marked_deletes.discard(path)
+            marked_deletes.pop(path, None)
 
         elif cmd_type == "set-move-dest":
             dest = cmd.get("destination", "")
@@ -86,6 +91,22 @@ def _rollback(completed_actions: list[dict]) -> None:
                 shutil.move(dest, src)
                 logger.info("Rollback: moved %s back to %s", dest, src)
 
+            elif action_type == "merge-unique":
+                # Files were copied from peer into hub — remove them
+                hub = action.get("hub", "")
+                peer = action.get("peer", "")
+                if hub and peer and os.path.isdir(hub) and os.path.isdir(peer):
+                    # Walk peer to find what was copied, remove from hub
+                    for root, _dirs, files in os.walk(peer):
+                        for fname in files:
+                            rel_path = os.path.relpath(os.path.join(root, fname), peer)
+                            hub_file = os.path.join(hub, rel_path)
+                            peer_file = os.path.join(peer, rel_path)
+                            # Only remove if hub has it but peer also still has it (was a copy)
+                            if os.path.exists(hub_file) and os.path.exists(peer_file):
+                                os.remove(hub_file)
+                    logger.info("Rollback: removed merged files from %s", hub)
+
             elif action_type in ("delete", "delete-file"):
                 logger.warning(
                     "Rollback: cannot restore deleted %s at %s",
@@ -108,6 +129,27 @@ def _rollback(completed_actions: list[dict]) -> None:
         )
 
 
+def _merge_unique_files(hub_dir: str, peer_dir: str) -> list[str]:
+    """Copy files from peer into hub that don't already exist in hub.
+
+    Preserves relative path structure. Returns list of relative paths copied.
+    This ensures no unique files are lost when a peer is deleted — the hub
+    becomes a complete superset of all copies before it moves to archive.
+    """
+    copied = []
+    for root, _dirs, files in os.walk(peer_dir):
+        for fname in files:
+            peer_file = os.path.join(root, fname)
+            rel_path = os.path.relpath(peer_file, peer_dir)
+            hub_file = os.path.join(hub_dir, rel_path)
+
+            if not os.path.exists(hub_file):
+                os.makedirs(os.path.dirname(hub_file), exist_ok=True)
+                shutil.copy2(peer_file, hub_file)
+                copied.append(rel_path)
+    return copied
+
+
 @huey.task()
 def commit_sandbox_session(session_id: int) -> dict:
     """Execute all sandbox commands atomically.
@@ -115,9 +157,10 @@ def commit_sandbox_session(session_id: int) -> dict:
     Execution order (dependency-safe):
     1. Create destination directories (set-move-dest)
     2. Tag originals (tag-original) -- DB update
-    3. Move originals to destinations (set-move-dest) -- shutil.move
-    4. Delete marked directories (mark-delete) -- shutil.rmtree
-    5. Apply keeper decisions (set-keeper/accept-suggestion) -- os.remove non-keepers
+    3. Merge unique files from peers into hub (preserves all unique content)
+    4. Move originals to destinations (set-move-dest) -- shutil.move
+    5. Delete marked directories (mark-delete) -- shutil.rmtree
+    6. Apply keeper decisions (set-keeper/accept-suggestion) -- os.remove non-keepers
     """
     db = get_sync_session()
     completed_actions: list[dict] = []
@@ -166,7 +209,26 @@ def commit_sandbox_session(session_id: int) -> dict:
             })
             logger.info("Tagged originals for %d directories", len(tagged_originals))
 
-        # --- Step 3: Move originals to destinations ---
+        # --- Step 3: Merge unique files from peers into hub ---
+        # Before deleting any peer, copy its unique files into the hub.
+        # This ensures the hub becomes a complete archive with every file
+        # from every copy — no unique content is lost.
+        for peer_dir, hub_dir in marked_deletes.items():
+            if hub_dir and os.path.isdir(hub_dir) and os.path.isdir(peer_dir):
+                copied = _merge_unique_files(hub_dir, peer_dir)
+                if copied:
+                    completed_actions.append({
+                        "type": "merge-unique",
+                        "hub": hub_dir,
+                        "peer": peer_dir,
+                        "files_copied": len(copied),
+                    })
+                    logger.info(
+                        "Merged %d unique files from %s into %s",
+                        len(copied), peer_dir, hub_dir,
+                    )
+
+        # --- Step 4: Move originals to destinations ---
         for src_dir, dest_dir in move_dests.items():
             if os.path.exists(src_dir):
                 final_dest = os.path.join(dest_dir, os.path.basename(src_dir))
@@ -178,14 +240,14 @@ def commit_sandbox_session(session_id: int) -> dict:
                 })
                 logger.info("Moved %s -> %s", src_dir, final_dest)
 
-        # --- Step 4: Delete marked directories ---
-        for dir_path in marked_deletes:
+        # --- Step 5: Delete marked directories ---
+        for dir_path in marked_deletes.keys():
             if os.path.exists(dir_path):
                 shutil.rmtree(dir_path)
                 completed_actions.append({"type": "delete", "path": dir_path})
                 logger.info("Deleted directory: %s", dir_path)
 
-        # --- Step 5: Apply keeper decisions (delete non-keepers) ---
+        # --- Step 6: Apply keeper decisions (delete non-keepers) ---
         for group_id, keeper_path in keepers.items():
             result = db.execute(
                 select(DuplicateFile)
