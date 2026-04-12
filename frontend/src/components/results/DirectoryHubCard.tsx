@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, ChevronDown, Network, ArrowUpToLine } from "lucide-react";
+import { Shield, ChevronDown, Network, ArrowUpToLine, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SimilarityBadge } from "@/components/common/SimilarityBadge";
@@ -9,6 +9,7 @@ import { formatBytes, formatNumber } from "@/lib/format";
 import { getRelationshipBgColor } from "@/lib/colors";
 import { cn } from "@/lib/utils";
 import type { DirectoryHub, PeerEntry } from "@/lib/groupHubs";
+import { useSandbox } from "@/hooks/useSandboxSession";
 
 interface DirectoryHubCardProps {
   hub: DirectoryHub;
@@ -31,6 +32,7 @@ export function DirectoryHubCard({
 }: DirectoryHubCardProps) {
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = useState(false);
+  const session = useSandbox();
 
   const handlePeerClick = (peer: PeerEntry) => {
     const dirA = peer.hubIsA ? hub.directory : peer.directory;
@@ -135,7 +137,10 @@ export function DirectoryHubCard({
             >
               {/* Main peer row */}
               <div
-                className="px-5 py-3.5 cursor-pointer hover:bg-accent/50 transition-colors"
+                className={cn(
+                  "px-5 py-3.5 cursor-pointer hover:bg-accent/50 transition-colors",
+                  session.derived.markedForDelete.has(peer.directory) && "bg-destructive/5 border-l-2 border-destructive/30"
+                )}
                 onClick={() => handlePeerClick(peer)}
                 title={
                   peer.uniqueInHub === 0 && peer.uniqueInPeer === 0
@@ -174,6 +179,37 @@ export function DirectoryHubCard({
                     >
                       <Network className="h-3.5 w-3.5" />
                       {peerExploded.length} connection{peerExploded.length > 1 ? "s" : ""}
+                    </Button>
+                  )}
+                  {session.derived.markedForDelete.has(peer.directory) ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs shrink-0 text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        session.execute({ type: "unmark-delete", directory: peer.directory });
+                      }}
+                      title="Unmark — will not be deleted"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        session.execute({
+                          type: "mark-delete",
+                          directory: peer.directory,
+                          reason: `Duplicate of ${hub.directory}`,
+                        });
+                      }}
+                      title="Mark for deletion"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   )}
                   <Button
