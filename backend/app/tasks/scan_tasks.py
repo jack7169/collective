@@ -5,7 +5,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, insert
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -20,6 +20,18 @@ from app.scanners.rmlint import RmlintBackend
 from app.tasks.worker import huey
 
 logger = logging.getLogger(__name__)
+
+
+class ScanCancelled(Exception):
+    """Raised when a scan is cancelled during processing."""
+    pass
+
+
+def _check_cancelled(session: Session, scan: "Scan"):
+    """Refresh scan from DB and raise ScanCancelled if user cancelled."""
+    session.refresh(scan)
+    if scan.status == "cancelled":
+        raise ScanCancelled(f"Scan {scan.id} cancelled by user")
 
 
 @huey.task()
@@ -42,6 +54,12 @@ def run_scan_task(scan_id: int):
 
         if scan.status == "cancelled":
             logger.info("Scan %d was cancelled before starting", scan_id)
+            return
+
+        # Guard against concurrent tasks — if scan is already actively running,
+        # another task must already be processing it. Bail out.
+        if scan.status in ("running", "parsing", "analyzing"):
+            logger.warning("Scan %d is already %s — another task is running, aborting duplicate", scan_id, scan.status)
             return
 
         # Determine resume phase
@@ -329,31 +347,28 @@ def run_scan_task(scan_id: int):
             session.commit()
 
         if not skip_parsing:
-            # Parse output and insert records
-            file_records = []
-            dir_records = []
+            # Parse output and collect raw dicts (not ORM objects — 10-20x faster insert)
+            file_records: list[dict] = []
+            dir_records: list[dict] = []
             total_files = 0
             total_size = 0
             duplicates = 0
             space_recoverable = 0
             unique_dirs: set[str] = set()
 
-            # Get output file size for parsing progress estimation
-            output_file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-            bytes_parsed = 0
             last_progress_update = time.time()
 
             for result in backend.parse_output(output_path):
                 if isinstance(result, DuplicateFileResult):
-                    file_records.append(DuplicateFile(
-                        scan_id=scan_id,
-                        checksum=result.checksum,
-                        path=result.path,
-                        size=result.size,
-                        mtime=result.mtime,
-                        is_original=result.is_original,
-                        group_id=result.group_id,
-                    ))
+                    file_records.append({
+                        "scan_id": scan_id,
+                        "checksum": result.checksum,
+                        "path": result.path,
+                        "size": result.size,
+                        "mtime": result.mtime,
+                        "is_original": result.is_original,
+                        "group_id": result.group_id,
+                    })
                     total_files += 1
                     total_size += result.size
                     unique_dirs.add(result.path.rsplit("/", 1)[0] if "/" in result.path else "")
@@ -361,20 +376,20 @@ def run_scan_task(scan_id: int):
                         duplicates += 1
                         space_recoverable += result.size
                 elif isinstance(result, DuplicateDirResult):
-                    dir_records.append(DuplicateDirectory(
-                        scan_id=scan_id,
-                        group_id=result.group_id,
-                        path=result.path,
-                        file_count=result.file_count,
-                        total_size=result.total_size,
-                        is_original=result.is_original,
-                    ))
+                    dir_records.append({
+                        "scan_id": scan_id,
+                        "group_id": result.group_id,
+                        "path": result.path,
+                        "file_count": result.file_count,
+                        "total_size": result.total_size,
+                        "is_original": result.is_original,
+                    })
                     unique_dirs.add(result.path)
 
                 # Update parsing progress every 2 seconds (60-70% range)
                 now = time.time()
                 if now - last_progress_update >= 2:
-                    # Estimate parse progress from record count (parsing phase = 60-70%)
+                    _check_cancelled(session, scan)
                     scan.progress_percent = 60.0 + min(10.0, total_files / max(1, total_files + 1000) * 10.0)
                     scan.progress_message = f"Parsing... {total_files:,} files found"
                     scan.total_files = total_files
@@ -382,17 +397,18 @@ def run_scan_task(scan_id: int):
                     session.commit()
                     last_progress_update = now
 
-            # Bulk insert in batches (5000 rows per flush for SQLite performance)
-            # Insert phase = 70-85% range
-            batch_size = 5000
+            # Raw bulk insert via executemany — bypasses ORM identity map entirely.
+            # 50k batch size is optimal for SQLite (single transaction per batch).
+            batch_size = 50_000
             total_to_insert = len(file_records) + len(dir_records)
             inserted = 0
             last_progress_update = time.time()
 
             for i in range(0, len(file_records), batch_size):
-                session.add_all(file_records[i:i + batch_size])
-                session.flush()
-                inserted += min(batch_size, len(file_records) - i)
+                _check_cancelled(session, scan)
+                batch = file_records[i:i + batch_size]
+                session.execute(insert(DuplicateFile), batch)
+                inserted += len(batch)
                 now = time.time()
                 if now - last_progress_update >= 2:
                     insert_pct = inserted / max(1, total_to_insert)
@@ -402,9 +418,10 @@ def run_scan_task(scan_id: int):
                     last_progress_update = now
 
             for i in range(0, len(dir_records), batch_size):
-                session.add_all(dir_records[i:i + batch_size])
-                session.flush()
-                inserted += min(batch_size, len(dir_records) - i)
+                _check_cancelled(session, scan)
+                batch = dir_records[i:i + batch_size]
+                session.execute(insert(DuplicateDirectory), batch)
+                inserted += len(batch)
             session.commit()
 
             scan.total_files = total_files
@@ -466,6 +483,16 @@ def run_scan_task(scan_id: int):
 
         logger.info("Scan %d completed successfully", scan_id)
 
+    except ScanCancelled:
+        logger.info("Scan %d cancelled by user during processing", scan_id)
+        try:
+            scan = session.get(Scan, scan_id)
+            if scan and scan.status != "cancelled":
+                scan.status = "cancelled"
+            scan.completed_at = datetime.now(timezone.utc)
+            session.commit()
+        except Exception:
+            pass
     except Exception as e:
         logger.exception("Scan %d failed: %s", scan_id, e)
         try:
