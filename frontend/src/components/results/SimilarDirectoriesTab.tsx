@@ -5,9 +5,8 @@ import {
 } from "lucide-react";
 import {
   useSimilarDirs,
-  useTagOriginals,
-  useTaggedOriginals,
 } from "@/api/results";
+import { useSandbox } from "@/hooks/useSandboxSession";
 import type { DirectorySimilarityFilters } from "@/api/types";
 import {
   Select,
@@ -35,6 +34,7 @@ interface SimilarDirectoriesTabProps {
 export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
   const [sortBy, setSortBy] = useState<SortField>("reclaimable");
   const [relationship, setRelationship] = useState<string>("all");
+  const session = useSandbox();
 
   // Fetch ALL pairs at once for client-side hub grouping
   const filters: DirectorySimilarityFilters = {
@@ -47,24 +47,14 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
 
   const { data, isLoading } = useSimilarDirs(scanId, filters);
 
-  // Tag state
-  const { data: tagData } = useTaggedOriginals(scanId);
-  const tagMutation = useTagOriginals(scanId);
-  const taggedPaths = useMemo(
-    () => new Set(tagData?.tagged_paths ?? []),
-    [tagData]
-  );
-
   // Tag & Move dialog state
   const [tagMoveHub, setTagMoveHub] = useState<string | null>(null);
-
-  // Hub promotion — user can override which directory is the hub
-  const [promotedHubs, setPromotedHubs] = useState<Set<string>>(new Set());
 
   // Group pairs into hubs (re-runs when promotions change)
   const pairs = data?.items ?? [];
   const hubs = useMemo(() => {
-    const grouped = groupIntoHubs(pairs, promotedHubs.size > 0 ? promotedHubs : undefined);
+    const prefs = session.derived.promotedHubs;
+    const grouped = groupIntoHubs(pairs, prefs.size > 0 ? prefs : undefined);
     if (sortBy === "peers") {
       grouped.sort((a, b) => b.peers.length - a.peers.length);
     } else if (sortBy === "size") {
@@ -72,7 +62,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
     }
     // "reclaimable" is the default from groupIntoHubs
     return grouped;
-  }, [pairs, sortBy, promotedHubs]);
+  }, [pairs, sortBy, session.derived.promotedHubs]);
 
   // Build adjacency for exploded network lookups
   const adjacency = useMemo(() => buildAdjacency(pairs), [pairs]);
@@ -96,16 +86,12 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
     setTagMoveHub(hubDir);
   };
 
-  const handleSkipMove = async (hubDir: string) => {
-    await tagMutation.mutateAsync([hubDir]);
+  const handleSkipMove = (hubDir: string) => {
+    session.execute({ type: "tag-original", directory: hubDir });
   };
 
   const handlePromotePeer = (peerDir: string) => {
-    setPromotedHubs((prev) => {
-      const next = new Set(prev);
-      next.add(peerDir);
-      return next;
-    });
+    session.execute({ type: "promote-hub", peerDir });
   };
 
   const tagMoveHubData = hubs.find((h) => h.directory === tagMoveHub);
@@ -177,7 +163,7 @@ export function SimilarDirectoriesTab({ scanId }: SimilarDirectoriesTabProps) {
               key={hub.directory}
               hub={hub}
               scanId={scanId}
-              isTagged={taggedPaths.has(hub.directory)}
+              isTagged={session.derived.taggedOriginals.has(hub.directory)}
               onTagMove={handleTagMove}
               onSkipMove={handleSkipMove}
               onPromotePeer={handlePromotePeer}
