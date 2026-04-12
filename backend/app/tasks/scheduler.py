@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.database import get_sync_session
 from app.models.saved_scan import SavedScan
