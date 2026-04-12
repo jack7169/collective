@@ -1,9 +1,9 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 import { Layers, Loader2, Sparkles } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useDuplicateGroups } from "@/api/results";
 import { post } from "@/api/client";
-import { useKeeperSelection } from "@/hooks/useKeeperSelection";
+import { useSandbox } from "@/hooks/useSandboxSession";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DuplicateGroupCard } from "./DuplicateGroupCard";
-import { ReviewApplyDialog } from "./ReviewApplyDialog";
+import type { SuggestedKeeper } from "@/hooks/useKeeperSelection";
 import { formatBytes, formatNumber } from "@/lib/format";
 
 interface DuplicateGroupsListProps {
@@ -37,13 +37,47 @@ interface SuggestKeepersResponse {
 export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState("size");
-  const [showReview, setShowReview] = useState(false);
   const { data, isLoading } = useDuplicateGroups(scanId, page, 20, sortBy);
   const groups = data?.items ?? [];
-  const queryClient = useQueryClient();
   const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const selection = useKeeperSelection(groups);
+  const session = useSandbox();
+
+  // Local suggestions state — only acceptance goes through the sandbox
+  const [suggestions, setSuggestions] = useState<
+    Map<string, SuggestedKeeper>
+  >(new Map());
+
+  // Compute stats from sandbox-derived keepers
+  const keeperStats = useMemo(() => {
+    let resolvedCount = 0;
+    let totalReclaimable = 0;
+    let totalDeleteFiles = 0;
+    if (!groups) return { resolvedCount, totalReclaimable, totalDeleteFiles };
+
+    for (const group of groups) {
+      const keeperId = session.derived.keepers.get(group.checksum);
+      if (keeperId != null) {
+        resolvedCount++;
+        for (const file of group.files) {
+          if (file.id !== keeperId) {
+            totalDeleteFiles++;
+            totalReclaimable += file.size;
+          }
+        }
+      }
+    }
+    return { resolvedCount, totalReclaimable, totalDeleteFiles };
+  }, [groups, session.derived.keepers]);
+
+  // Count suggestions that haven't been resolved yet
+  const unresolvedSuggestionCount = useMemo(() => {
+    let count = 0;
+    for (const checksum of suggestions.keys()) {
+      if (!session.derived.keepers.has(checksum)) count++;
+    }
+    return count;
+  }, [suggestions, session.derived.keepers]);
 
   const suggestMutation = useMutation({
     mutationFn: (
@@ -53,27 +87,31 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
         decisions,
       }),
     onSuccess: (data) => {
-      selection.updateSuggestions(
-        data.suggestions.map((s) => ({
-          groupChecksum: s.group_checksum,
-          suggestedFileId: s.suggested_file_id,
-          confidence: s.confidence,
-          reason: s.reason,
-        }))
-      );
+      const map = new Map<string, SuggestedKeeper>();
+      for (const s of data.suggestions) {
+        if (!session.derived.keepers.has(s.group_checksum)) {
+          map.set(s.group_checksum, {
+            groupChecksum: s.group_checksum,
+            suggestedFileId: s.suggested_file_id,
+            confidence: s.confidence,
+            reason: s.reason,
+          });
+        }
+      }
+      setSuggestions(map);
     },
   });
 
   const handleSetKeeper = useCallback(
     (checksum: string, fileId: number) => {
-      selection.setKeeper(checksum, fileId);
+      session.execute({ type: "set-keeper", checksum, fileId });
 
       const allDecisions: Array<{
         group_checksum: string;
         kept_file_id: number;
       }> = [];
       for (const group of groups) {
-        const existing = selection.keepers.get(group.checksum);
+        const existing = session.derived.keepers.get(group.checksum);
         if (existing != null) {
           allDecisions.push({
             group_checksum: group.checksum,
@@ -92,31 +130,41 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
         }, 500);
       }
     },
-    [groups, selection, suggestMutation]
+    [groups, session, suggestMutation]
   );
 
-  const executeMutation = useMutation({
-    mutationFn: async () => {
-      for (const decision of selection.decisions) {
-        for (const path of decision.deletePaths) {
-          const action = await post<{ id: number }>("/actions", {
-            scan_id: Number(scanId),
-            action_type: "delete",
-            source_path: path,
-            notes: `Keep: ${decision.keeperPath}`,
-          });
-          await post(`/actions/${action.id}/confirm`, {});
-        }
+  const handleClearKeeper = useCallback(
+    (checksum: string) => {
+      session.execute({ type: "clear-keeper", checksum });
+    },
+    [session]
+  );
+
+  const handleAcceptSuggestion = useCallback(
+    (checksum: string) => {
+      const suggestion = suggestions.get(checksum);
+      if (suggestion) {
+        session.execute({
+          type: "accept-suggestion",
+          checksum,
+          fileId: suggestion.suggestedFileId,
+        });
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scans", scanId] });
-    },
-  });
+    [suggestions, session]
+  );
 
-  const handleApply = async () => {
-    await executeMutation.mutateAsync();
-  };
+  const handleAcceptAllSuggestions = useCallback(() => {
+    const entries: Array<{ checksum: string; fileId: number }> = [];
+    for (const [checksum, suggestion] of suggestions) {
+      if (!session.derived.keepers.has(checksum)) {
+        entries.push({ checksum, fileId: suggestion.suggestedFileId });
+      }
+    }
+    if (entries.length > 0) {
+      session.execute({ type: "accept-all-suggestions", suggestions: entries });
+    }
+  }, [suggestions, session]);
 
   if (isLoading) {
     return (
@@ -158,13 +206,13 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
           </Select>
 
           <span className="text-sm text-muted-foreground">
-            {selection.resolvedCount} of {formatNumber(data.total)} groups
+            {keeperStats.resolvedCount} of {formatNumber(data.total)} groups
             resolved
-            {selection.totalReclaimable > 0 && (
+            {keeperStats.totalReclaimable > 0 && (
               <>
                 {" · "}
                 <span className="text-destructive font-medium">
-                  {formatBytes(selection.totalReclaimable)} reclaimable
+                  {formatBytes(keeperStats.totalReclaimable)} reclaimable
                 </span>
               </>
             )}
@@ -172,23 +220,16 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          {selection.unresolvedSuggestionCount > 0 && (
+          {unresolvedSuggestionCount > 0 && (
             <Button
               variant="outline"
               size="sm"
-              onClick={selection.acceptAllSuggestions}
+              onClick={handleAcceptAllSuggestions}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Accept All Suggestions ({selection.unresolvedSuggestionCount})
+              Accept All Suggestions ({unresolvedSuggestionCount})
             </Button>
           )}
-          <Button
-            size="sm"
-            disabled={selection.resolvedCount === 0}
-            onClick={() => setShowReview(true)}
-          >
-            Review & Apply
-          </Button>
         </div>
       </div>
 
@@ -198,11 +239,11 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
           <DuplicateGroupCard
             key={group.checksum}
             group={group}
-            keeperFileId={selection.keepers.get(group.checksum)}
-            suggestion={selection.suggestions.get(group.checksum)}
+            keeperFileId={session.derived.keepers.get(group.checksum)}
+            suggestion={suggestions.get(group.checksum)}
             onSetKeeper={handleSetKeeper}
-            onClearKeeper={selection.clearKeeper}
-            onAcceptSuggestion={selection.acceptSuggestion}
+            onClearKeeper={handleClearKeeper}
+            onAcceptSuggestion={handleAcceptSuggestion}
           />
         ))}
       </div>
@@ -235,15 +276,6 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
         </div>
       )}
 
-      {/* Review dialog */}
-      <ReviewApplyDialog
-        open={showReview}
-        onOpenChange={setShowReview}
-        decisions={selection.decisions}
-        totalReclaimable={selection.totalReclaimable}
-        totalDeleteFiles={selection.totalDeleteFiles}
-        onApply={handleApply}
-      />
     </div>
   );
 }
