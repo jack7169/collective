@@ -280,8 +280,8 @@ async def scan_stats(scan_id: int, db: AsyncSession = Depends(get_db)):
     return {
         "scan_id": scan_id,
         "total_files": total_files,
-        "total_duplicates": total_dupes,
-        "space_recoverable": space_recoverable,
+        "total_duplicates": duplicate_count,
+        "space_recoverable": recoverable_space,
         "similar_directory_pairs": similar_dirs_count,
         "top_groups_by_size": top_groups,
         "scan_status": scan.status,
