@@ -25,6 +25,8 @@ import { DuplicateGroupsList } from "@/components/results/DuplicateGroupsList";
 import { SimilarDirectoriesTab } from "@/components/results/SimilarDirectoriesTab";
 import { formatDate, formatTimestamp, formatElapsed } from "@/lib/format";
 import { DeleteScanDialog } from "@/components/common/DeleteScanDialog";
+import { SandboxSessionProvider } from "@/hooks/useSandboxSession";
+import { SessionSummaryBar } from "@/components/results/SessionSummaryBar";
 
 const statusBadgeVariant: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
   completed: "success",
@@ -70,6 +72,7 @@ export function ScanResults() {
   }
 
   return (
+    <SandboxSessionProvider scanId={id!}>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -250,5 +253,7 @@ export function ScanResults() {
         navigateOnSuccess="/"
       />
     </div>
+    <SessionSummaryBar />
+    </SandboxSessionProvider>
   );
 }
