@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Layers, Loader2, Sparkles } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDuplicateGroups } from "@/api/results";
@@ -41,6 +41,7 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
   const { data, isLoading } = useDuplicateGroups(scanId, page, 20, sortBy);
   const groups = data?.items ?? [];
   const queryClient = useQueryClient();
+  const suggestDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selection = useKeeperSelection(groups);
 
@@ -85,7 +86,10 @@ export function DuplicateGroupsList({ scanId }: DuplicateGroupsListProps) {
       }
 
       if (allDecisions.length >= 3) {
-        suggestMutation.mutate(allDecisions);
+        if (suggestDebounceRef.current) clearTimeout(suggestDebounceRef.current);
+        suggestDebounceRef.current = setTimeout(() => {
+          suggestMutation.mutate(allDecisions);
+        }, 500);
       }
     },
     [groups, selection, suggestMutation]
