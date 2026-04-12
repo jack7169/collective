@@ -111,6 +111,20 @@ async def update_sandbox(
     return SessionResponse.from_orm(session)
 
 
+@router.post("/sandbox/{session_id}/commit")
+async def commit_session(session_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(SandboxSession).where(SandboxSession.id == session_id)
+    )
+    session = result.scalars().first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from app.tasks.session_tasks import commit_sandbox_session
+    commit_sandbox_session(session.id)
+    return {"status": "committing", "session_id": session_id}
+
+
 @router.delete("/sandbox/{session_id}")
 async def delete_sandbox(session_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SandboxSession).where(SandboxSession.id == session_id))
