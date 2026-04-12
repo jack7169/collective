@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DuplicateGroup } from "@/api/types";
-import type { SuggestedKeeper } from "@/hooks/useKeeperSelection";
+import type { SuggestedKeeper } from "@/api/types";
 
 interface DuplicateGroupCardProps {
   group: DuplicateGroup;

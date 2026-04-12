@@ -313,3 +313,18 @@ export interface SavedScan {
   created_at: string;
   updated_at?: string | null;
 }
+
+export interface SuggestedKeeper {
+  groupChecksum: string;
+  suggestedFileId: number;
+  confidence: number;
+  reason: string;
+}
+
+export interface KeeperDecision {
+  checksum: string;
+  keeperFileId: number;
+  keeperPath: string;
+  deletePaths: string[];
+  reclaimableBytes: number;
+}

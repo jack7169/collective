@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DuplicateGroupCard } from "./DuplicateGroupCard";
-import type { SuggestedKeeper } from "@/hooks/useKeeperSelection";
+import type { SuggestedKeeper } from "@/api/types";
 import { formatBytes, formatNumber } from "@/lib/format";
 
 interface DuplicateGroupsListProps {
