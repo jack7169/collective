@@ -1,4 +1,4 @@
-import { Shield, Check } from "lucide-react";
+import { Shield, Check, CheckCircle, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "@/lib/format";
@@ -10,6 +10,8 @@ interface DuplicateGroupCardProps {
   group: DuplicateGroup;
   keeperFileId: number | undefined;
   suggestion: SuggestedKeeper | undefined;
+  autoResolution?: { fileId: number; reason: string };
+  fileStatuses?: Map<number, "original" | "doomed" | "neutral">;
   onSetKeeper: (checksum: string, fileId: number) => void;
   onClearKeeper: (checksum: string) => void;
   onAcceptSuggestion: (checksum: string) => void;
@@ -19,11 +21,14 @@ export function DuplicateGroupCard({
   group,
   keeperFileId,
   suggestion,
+  autoResolution,
+  fileStatuses,
   onSetKeeper,
   onClearKeeper,
   onAcceptSuggestion,
 }: DuplicateGroupCardProps) {
   const isResolved = keeperFileId != null;
+  const isAutoResolved = autoResolution != null && keeperFileId === autoResolution.fileId;
   const reclaimable = isResolved
     ? group.files
         .filter((f) => f.id !== keeperFileId)
@@ -79,6 +84,16 @@ export function DuplicateGroupCard({
         </div>
       </div>
 
+      {/* Auto-resolved banner */}
+      {autoResolution && keeperFileId === autoResolution.fileId && (
+        <div className="px-4 py-2 bg-success/5 border-b border-success/20 flex items-center gap-2">
+          <CheckCircle className="h-3.5 w-3.5 text-success" />
+          <span className="text-xs text-success">
+            {autoResolution.reason}
+          </span>
+        </div>
+      )}
+
       {/* File list */}
       <div className="divide-y divide-border">
         {group.files.map((file) => {
@@ -94,7 +109,8 @@ export function DuplicateGroupCard({
                 "flex items-center gap-3 px-4 py-2.5",
                 isKeeper && "bg-success/5",
                 isDoomed && "bg-destructive/5 opacity-60",
-                isSuggested && "border-l-2 border-l-primary"
+                isSuggested && "border-l-2 border-l-primary",
+                isAutoResolved && !isKeeper && "opacity-50"
               )}
             >
               {/* Status badge / action button */}
@@ -141,7 +157,25 @@ export function DuplicateGroupCard({
                 )}
               >
                 {file.path}
+                {isKeeper && fileStatuses?.get(file.id) === "doomed" && (
+                  <div className="mt-1 flex items-center gap-1.5 text-[10px] text-amber-400">
+                    <AlertTriangle className="h-3 w-3 shrink-0" />
+                    <span>Parent directory is staged for deletion — keeper will be lost</span>
+                  </div>
+                )}
               </div>
+
+              {/* Cross-tab status badges */}
+              {fileStatuses?.get(file.id) === "original" && (
+                <span className="text-[9px] font-medium text-success bg-success/10 px-1.5 py-0.5 rounded shrink-0">
+                  Original dir
+                </span>
+              )}
+              {fileStatuses?.get(file.id) === "doomed" && (
+                <span className="text-[9px] font-medium text-destructive bg-destructive/10 px-1.5 py-0.5 rounded shrink-0">
+                  Pending delete
+                </span>
+              )}
 
               {/* Metadata */}
               <div className="shrink-0 flex items-center gap-4 text-[11px] text-muted-foreground">
