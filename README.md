@@ -6,8 +6,8 @@ Duplicate file detection and directory consolidation tool for Unraid and Docker.
 
 - **Multi-engine scanning** — supports [fclones](https://github.com/pkolaczk/fclones) (default, multi-threaded) and [rmlint](https://rmlint.readthedocs.io/) (native directory detection)
 - **Pick the Keeper** — one-click sandbox model for resolving duplicate groups. Pick which copy to keep, all others are marked for deletion. Smart suggestions learn from your path preferences after 3+ decisions.
-- **Directory similarity analysis** — card-based view with full directory paths, inline "Mark as Original" tagging, differences dropdown with date analysis and merge/version verdicts
-- **Side-by-side comparison** — progressive-loading tree diff with smart folder collapsing, cached for instant revisits
+- **Exploded Network hub view** — directories grouped by overlap cluster, sorted by reclaimable GB. Each hub shows all overlapping peers with similarity badges, relationship tags, and "Tag & Move" to extract canonical copies to an archive structure
+- **Assimilate Duplicates** — side-by-side directory comparison with progressive-loading tree diff, smart folder collapsing, and LRU-cached results for instant revisits
 - **Review & Apply** — two-column review popup showing files being kept vs deleted, grouped by directory, before committing changes to disk
 - **Auto-save scans** — completed scans automatically saved as reusable configurations
 - **Saved scans** — persistent scan configurations with optional scheduling
@@ -113,11 +113,12 @@ Docker (supervisord: fastapi + huey + scheduler)
 
 ### Database
 
-SQLite with WAL mode, optimized for concurrent read/write access across the API server, background task workers, and scheduler:
+SQLite with WAL mode, tuned for a 125GB RAM server:
 
 - **Two engines** — async (API) and shared sync (workers/scheduler) with unified pragmas
 - **WAL + busy_timeout** — 60-second lock retry, `synchronous=NORMAL` for performance
-- **Indexed foreign keys** — `scan_id` indexes on all child tables for fast cascade deletes
+- **1GB page cache + 4GB mmap** — leverages available RAM for memory-mapped I/O
+- **Indexed foreign keys** — composite indexes on `(scan_id, is_original)`, `(scan_id, group_id)`, `(scan_id, checksum)`, `(scan_id, path)` for fast queries
 - **Batch operations** — large deletes (1M+ rows) processed in 50k batches to avoid lock contention
 - **LRU-cached** comparison results for instant revisits
 - **Versioned schema** — migrations tracked via `schema_version` in settings table
@@ -126,9 +127,11 @@ SQLite with WAL mode, optimized for concurrent read/write access across the API 
 
 **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Radix UI (shadcn/ui), TanStack Query
 
-**Backend**: FastAPI, SQLAlchemy 2.0 (async + sync), Huey, SQLite (WAL)
+**Backend**: FastAPI, SQLAlchemy 2.0 (async + sync), Huey, SQLite (WAL), orjson
 
 **Scanners**: fclones (Rust, multi-threaded), rmlint (C, Merkle trees)
+
+**Performance**: Producer/consumer thread pipeline overlaps JSON parsing (orjson, 5-10x faster than stdlib) with SQLite bulk inserts. Similarity analysis uses in-memory index built during parsing — skips re-reading millions of rows. Early Jaccard pruning eliminates impossible pairs before accumulation.
 
 ## License
 
