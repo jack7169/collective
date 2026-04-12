@@ -12,8 +12,9 @@ _SQLITE_PRAGMAS = [
     "PRAGMA foreign_keys=ON",
     "PRAGMA busy_timeout=60000",
     "PRAGMA synchronous=NORMAL",
-    "PRAGMA cache_size=-64000",   # 64MB cache
+    "PRAGMA cache_size=-1000000",    # 1GB cache (was 64MB) — leverage available RAM
     "PRAGMA temp_store=MEMORY",
+    "PRAGMA mmap_size=4294967296",   # 4GB memory-mapped I/O
 ]
 
 
@@ -134,4 +135,22 @@ async def init_db():
 
             await conn.execute(text(
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')"
+            ))
+
+        if current_version < 3:
+            # v3: New indexes for performance
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_duplicate_files_scan_is_original "
+                "ON duplicate_files (scan_id, is_original)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_duplicate_files_scan_group "
+                "ON duplicate_files (scan_id, group_id)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_duplicate_dirs_scan_group "
+                "ON duplicate_directories (scan_id, group_id)"
+            ))
+            await conn.execute(text(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '3')"
             ))
