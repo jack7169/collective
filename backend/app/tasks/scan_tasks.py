@@ -83,25 +83,27 @@ def run_scan_task(scan_id: int):
         elif resume_phase:
             logger.info("Scan %d: resuming from %s phase (re-running scanner, cached hashes speed up steps 1-5)", scan_id, resume_phase)
 
-        # Clear resume state and track run timing
-        scan.interrupted_phase = None
+        # Track current phase for resume (set throughout task, cleared only on success)
         scan.error_message = None
         scan.completed_at = None
         scan.resumed_at = datetime.now(timezone.utc)
         if not scan.accumulated_seconds:
             scan.accumulated_seconds = 0
 
-        # Update status immediately so the UI reflects that work has started
+        # Update status and interrupted_phase (phase tracks where to resume if killed)
         if skip_scanner and skip_parsing:
             scan.status = "analyzing"
+            scan.interrupted_phase = "analyzing"
             scan.progress_percent = 85.0
             scan.progress_message = "Resuming similarity analysis..."
         elif skip_scanner:
             scan.status = "parsing"
+            scan.interrupted_phase = "parsing"
             scan.progress_percent = 60.0
             scan.progress_message = "Resuming — re-parsing scanner output..."
         else:
             scan.status = "running"
+            scan.interrupted_phase = "running"
             if not resume_phase:
                 scan.progress_percent = 0.0
                 scan.progress_message = "Starting scan..."
@@ -326,6 +328,7 @@ def run_scan_task(scan_id: int):
         if not skip_parsing:
             # Parsing phase (60-85% of overall progress)
             scan.status = "parsing"
+            scan.interrupted_phase = "parsing"
             scan.progress_percent = 60.0
             scan.progress_message = "Parsing scanner output..."
             session.commit()
@@ -432,6 +435,7 @@ def run_scan_task(scan_id: int):
 
         # Analysis phase (85-100%) — clear old similarities if resuming
         scan.status = "analyzing"
+        scan.interrupted_phase = "analyzing"
         scan.progress_percent = 85.0
         scan.progress_message = "Computing directory similarities..."
         session.execute(
@@ -448,8 +452,9 @@ def run_scan_task(scan_id: int):
             target_paths=scan.target_paths,
         )
 
-        # Complete
+        # Complete — clear interrupted_phase only on success
         scan.status = "completed"
+        scan.interrupted_phase = None
         scan.progress_percent = 100.0
         scan.progress_message = f"Done. Found {duplicates} duplicates, {similarity_count} similar directory pairs."
         scan.completed_at = datetime.now(timezone.utc)
@@ -505,12 +510,15 @@ def run_scan_task(scan_id: int):
         except Exception:
             logger.exception("Failed to update scan status after error")
     finally:
-        # Clean up output file and ALL fclones cache dirs (runs on success, failure, and cancel)
+        # Clean up fclones cache dirs (always — they're only needed during scanning).
+        # Only delete the output file on success — keep it for resume on cancel/failure.
         import glob
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        scan_final = session.get(Scan, scan_id)
+        if scan_final and scan_final.status == "completed":
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
         base = output_path.rsplit(".", 1)[0]
         for cache_dir in glob.glob(f"{base}*cache*"):
             if os.path.isdir(cache_dir):
