@@ -125,6 +125,32 @@ class TestFclonesParseOutput:
         results = list(backend.parse_output("/nonexistent.json"))
         assert results == []
 
+    def test_parse_output_uses_orjson(self, tmp_path):
+        """Verify parse_output works with orjson (same output as json.load)."""
+        import orjson
+        output_file = tmp_path / "output.json"
+        data = {
+            "header": {},
+            "groups": [
+                {
+                    "hash": "abc123",
+                    "file_len": 100,
+                    "files": [
+                        {"path": "/mnt/user/a/file1.txt", "modified": "2026-01-01T00:00:00"},
+                        {"path": "/mnt/user/b/file1.txt", "modified": "2026-01-01T00:00:00"},
+                    ]
+                }
+            ]
+        }
+        output_file.write_bytes(orjson.dumps(data))
+        backend = FclonesBackend()
+        results = list(backend.parse_output(str(output_file)))
+        assert len(results) == 2
+        assert results[0].checksum == "abc123"
+        assert results[0].is_original is True
+        assert results[1].is_original is False
+        assert results[0].size == 100
+
 
 class TestParseSizeString:
     def test_gigabytes(self):

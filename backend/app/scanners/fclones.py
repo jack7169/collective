@@ -1,5 +1,5 @@
 """fclones scanner backend."""
-import json
+import orjson
 import logging
 import os
 import re
@@ -69,10 +69,10 @@ class FclonesBackend(ScannerBackend):
         return cmd
 
     def parse_output(self, output_path: str) -> Iterator[DuplicateFileResult | DuplicateDirResult]:
-        with open(output_path) as f:
+        with open(output_path, "rb") as f:
             try:
-                data = json.load(f)
-            except json.JSONDecodeError:
+                data = orjson.loads(f.read())
+            except (orjson.JSONDecodeError, ValueError):
                 logger.error("Failed to parse fclones output: %s", output_path)
                 return
 

@@ -45,8 +45,6 @@ _sync_url = settings.DATABASE_URL.replace("sqlite+aiosqlite:", "sqlite:")
 _sync_engine = create_engine(
     _sync_url,
     connect_args={"check_same_thread": False, "timeout": 60},
-    pool_size=5,
-    max_overflow=0,
     pool_pre_ping=True,
 )
 event.listens_for(_sync_engine, "connect")(_apply_pragmas)
